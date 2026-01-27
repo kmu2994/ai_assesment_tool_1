@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Database
+*.db
+backend/data/*.db
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Test coverage
+coverage/
+htmlcov/
+.coverage
+
+# Docker cache (optional - keep docker files)
+.docker/

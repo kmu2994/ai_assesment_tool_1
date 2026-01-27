@@ -1,0 +1,41 @@
+# Docker Compose for AI Inclusive Assessment System
+version: '3.8'
+
+services:
+  # Backend API Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ai-assessment-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/data:/app/data  # Persist SQLite database
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///./data/assessment.db
+      - SECRET_KEY=your-super-secret-key-change-in-production
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Frontend React Service
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ai-assessment-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+# Optional: Named volumes for data persistence
+volumes:
+  backend-data:
