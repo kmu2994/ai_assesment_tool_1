@@ -1,8 +1,8 @@
 """
-Pydantic Schemas for API Request/Response
+Pydantic Schemas for API Request/Response - MongoDB Version
 """
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
 
@@ -24,12 +24,13 @@ class UserLogin(BaseModel):
     password: str
 
 class UserResponse(BaseModel):
-    id: int
+    id: str
     username: str
     email: str
-    full_name: Optional[str]
+    full_name: Optional[str] = None
     role: str
-    accessibility_mode: bool
+    accessibility_mode: bool = False
+    
     class Config:
         from_attributes = True
 
@@ -48,12 +49,13 @@ class QuestionCreate(BaseModel):
     model_answer: Optional[str] = None
 
 class QuestionResponse(BaseModel):
-    id: int
+    id: str
     question_text: str
     question_type: str
     difficulty: float
     points: float
-    options: Optional[Dict[str, str]]
+    options: Optional[Dict[str, str]] = None
+    
     class Config:
         from_attributes = True
 
@@ -67,36 +69,51 @@ class ExamCreate(BaseModel):
     questions: List[QuestionCreate] = []
 
 class ExamResponse(BaseModel):
-    id: int
+    id: str
     title: str
-    description: Optional[str]
-    is_adaptive: bool
-    duration_minutes: int
-    total_marks: float
-    passing_score: float
-    is_active: bool
-    created_at: datetime
+    description: Optional[str] = None
+    is_adaptive: bool = True
+    duration_minutes: int = 60
+    total_questions: int = 0
+    total_marks: float = 100.0
+    passing_score: float = 40.0
+    is_active: bool = True
+    created_at: Optional[datetime] = None
+    
     class Config:
         from_attributes = True
 
 class AnswerSubmit(BaseModel):
-    question_id: int
+    question_id: str
     answer: Optional[str] = None
 
 class SubmissionResponse(BaseModel):
-    id: int
-    exam_id: int
+    id: str
+    exam_id: str
     status: str
-    total_score: float
-    percentage: float
+    total_score: float = 0.0
+    percentage: float = 0.0
+    
     class Config:
         from_attributes = True
 
 class GradingResult(BaseModel):
-    success: bool
-    is_correct: bool
-    score: float
-    feedback: str
+    success: bool = True
+    is_correct: bool = False
+    score: float = 0.0
+    feedback: str = ""
     similarity: Optional[float] = None
-    next_question: Optional[QuestionResponse] = None
+    plagiarism_detected: bool = False
+    next_question: Optional[Dict[str, Any]] = None
     exam_complete: bool = False
+
+class AnswerReview(BaseModel):
+    answer_id: str
+    modified_score: float
+    teacher_remarks: Optional[str] = None
+
+class SubmissionReview(BaseModel):
+    submission_id: str
+    teacher_remarks: Optional[str] = None
+    answer_reviews: List[AnswerReview] = []
+    is_finalized: bool = True

@@ -1,6 +1,6 @@
 """
 FastAPI Application Entry Point
-AI-Driven Inclusive Assessment System
+AI-Driven Inclusive Assessment System with MongoDB
 """
 import logging
 from contextlib import asynccontextmanager
@@ -9,8 +9,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from fastapi.staticfiles import StaticFiles
+import os
+
 from app.core.config import settings
-from app.db.database import init_db
+from app.db.database import connect_db, close_db
 from app.api import auth, exams, analytics
 
 # Configure logging
@@ -21,8 +24,10 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
     logger.info("Starting AI Inclusive Assessment System...")
-    await init_db()
-    logger.info("Database initialized.")
+    
+    # Connect to MongoDB
+    await connect_db()
+    logger.info("MongoDB connected and initialized.")
     
     # Pre-load AI models
     logger.info("Loading AI models (this may take a moment)...")
@@ -30,10 +35,12 @@ async def lifespan(app: FastAPI):
         from app.agents.semantic_grader import grading_agent
         logger.info("AI models loaded successfully!")
     except Exception as e:
-        logger.error(f"Error loading AI models: {e}")
+        logger.warning(f"AI models not loaded (using mock): {e}")
     
     yield
     
+    # Cleanup
+    await close_db()
     logger.info("Shutting down...")
 
 # Create FastAPI app
@@ -62,6 +69,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Static files for uploads
+os.makedirs("uploads", exist_ok=True)
+app.mount("/api/uploads", StaticFiles(directory="uploads"), name="uploads")
+
 # Include routers
 app.include_router(auth.router, prefix="/api")
 app.include_router(exams.router, prefix="/api")
@@ -72,13 +83,14 @@ async def root():
     return {
         "message": "AI-Driven Inclusive Assessment System",
         "version": "1.0.0",
+        "database": "MongoDB",
         "docs": "/docs",
         "status": "running"
     }
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    return {"status": "healthy", "database": "mongodb"}
 
 if __name__ == "__main__":
     import uvicorn

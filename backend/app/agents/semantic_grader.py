@@ -1,6 +1,6 @@
-# from sentence_transformers import SentenceTransformer, util
 import logging
 import re
+from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +11,6 @@ class SemanticGradingAgent:
     """
     
     _instance = None
-    _model = None
     
     def __new__(cls):
         if cls._instance is None:
@@ -20,46 +19,45 @@ class SemanticGradingAgent:
     
     def __init__(self):
         # Mock model loading
-        logger.info("Semantic grading (Mocked Mode) initialized.")
+        if not hasattr(self, '_initialized'):
+            logger.info("Semantic grading (Mocked Mode) initialized using word overlap.")
+            self._initialized = True
     
-    @property
-    def model(self):
-        return None
-    
-    def _get_overlap(self, text1: str, text2: str) -> float:
-        words1 = set(re.findall(r'\w+', text1.lower()))
-        words2 = set(re.findall(r'\w+', text2.lower()))
-        if not words1 or not words2: return 0.0
-        intersection = words1.intersection(words2)
-        return len(intersection) / max(len(words1), len(words2))
+    def _get_overlap(self, student_text: str, model_text: str) -> Dict[str, Any]:
+        """Calculate recall-based keyword overlap."""
+        if not student_text or not model_text:
+            return {"similarity": 0.0, "keywords_matched": []}
+        
+        # Filter out common stop words for better keyword matching
+        stop_words = {'the', 'is', 'at', 'which', 'on', 'and', 'a', 'an', 'in', 'to', 'for', 'with', 'of'}
+        
+        student_words = set(re.findall(r'\w+', student_text.lower()))
+        model_words = set(re.findall(r'\w+', model_text.lower()))
+        
+        # Keywords are model words that aren't stop words
+        keywords = model_words - stop_words
+        
+        if not keywords:
+            # If model answer is very short (like one word), just compare directly
+            intersection = student_words.intersection(model_words)
+            similarity = len(intersection) / len(model_words) if model_words else 0.0
+            return {"similarity": similarity, "keywords_matched": list(intersection)}
+            
+        intersection = student_words.intersection(keywords)
+        
+        # Calculate Recall (how many model keywords did the student cover?)
+        # This is better for "Key Points" than Jaccard similarity
+        similarity = len(intersection) / len(keywords)
+        
+        return {
+            "similarity": similarity,
+            "keywords_matched": list(intersection)
+        }
 
     def grade_answer(self, student_answer: str, model_answer: str, max_points: float = 1.0) -> Dict[str, Any]:
-        # Handle empty answers
-        if not student_answer or not student_answer.strip():
-            return {
-                "score": 0.0,
-                "similarity": 0.0,
-                "percentage": 0,
-                "feedback": "No answer provided.",
-                "grade": "F"
-            }
-        
-        # Simple word overlap similarity
-        similarity = self._get_overlap(student_answer, model_answer)
-        # Boost similarity slightly for mock purposes to be more generous
-        similarity = min(1.0, similarity * 1.5)
         """
-        Grade a descriptive answer by comparing semantic similarity.
-        
-        Args:
-            student_answer: The student's response text
-            model_answer: The reference/correct answer
-            max_points: Maximum points for this question
-            
-        Returns:
-            Dictionary containing score, similarity, and feedback
+        Grade a descriptive answer by matching against model answer keywords.
         """
-        # Handle empty answers
         if not student_answer or not student_answer.strip():
             return {
                 "score": 0.0,
@@ -74,49 +72,41 @@ class SemanticGradingAgent:
                 "score": 0.0,
                 "similarity": 0.0,
                 "percentage": 0,
-                "feedback": "No model answer available for comparison.",
+                "feedback": "No reference answer available for comparison.",
                 "grade": "N/A"
             }
         
         try:
-            # Encode both answers
-            embeddings = self.model.encode([student_answer, model_answer], convert_to_tensor=True)
+            # Analysis
+            analysis = self._get_overlap(student_answer, model_answer)
+            similarity = analysis["similarity"]
+            matched_keywords = analysis["keywords_matched"]
             
-            # Calculate cosine similarity
-            similarity = util.cos_sim(embeddings[0], embeddings[1]).item()
-            
-            # Normalize negative similarity to 0
-            similarity = max(0.0, similarity)
-            
-            # Grade based on similarity thresholds
+            # Grade based on keyword coverage
             if similarity >= 0.85:
                 percentage = 100
                 grade = "A+"
-                feedback = "Excellent! Your answer demonstrates complete understanding."
-            elif similarity >= 0.75:
-                percentage = 90
-                grade = "A"
-                feedback = "Great answer! Very close to the expected response."
+                feedback = f"Excellent coverage of key concepts! You matched several key points including: {', '.join(matched_keywords[:3])}."
             elif similarity >= 0.65:
-                percentage = 80
-                grade = "B"
-                feedback = "Good understanding. Minor details may be missing."
-            elif similarity >= 0.55:
-                percentage = 65
-                grade = "C"
-                feedback = "Satisfactory. Some key concepts are present."
+                percentage = 85
+                grade = "A"
+                feedback = "Great job! You identified most of the critical points requested."
             elif similarity >= 0.45:
+                percentage = 70
+                grade = "B"
+                feedback = "Good response. You've hit the main concepts, though some depth could be added."
+            elif similarity >= 0.25:
                 percentage = 50
+                grade = "C"
+                feedback = "Partial understanding. You mentioned some relevant terms, but missed core details."
+            elif similarity >= 0.1:
+                percentage = 25
                 grade = "D"
-                feedback = "Partial understanding. Important concepts are missing."
-            elif similarity >= 0.35:
-                percentage = 30
-                grade = "E"
-                feedback = "Weak answer. Related but not accurate enough."
+                feedback = "Basic effort. Only 1-2 keywords were identified. Review the topic again."
             else:
                 percentage = 0
                 grade = "F"
-                feedback = "Answer does not match expected response."
+                feedback = "Your answer does not address the required key points for this question."
             
             # Calculate actual score
             score = (percentage / 100) * max_points
@@ -126,7 +116,8 @@ class SemanticGradingAgent:
                 "similarity": round(similarity, 4),
                 "percentage": percentage,
                 "feedback": feedback,
-                "grade": grade
+                "grade": grade,
+                "matched_count": len(matched_keywords)
             }
             
         except Exception as e:
@@ -140,15 +131,7 @@ class SemanticGradingAgent:
             }
     
     def batch_grade(self, answers: list) -> list:
-        """
-        Grade multiple answers in batch for efficiency.
-        
-        Args:
-            answers: List of dicts with 'student_answer', 'model_answer', 'max_points'
-            
-        Returns:
-            List of grading results
-        """
+        """Grade multiple answers in batch."""
         results = []
         for answer in answers:
             result = self.grade_answer(

@@ -1,36 +1,46 @@
 """
-Database connection and session management
+MongoDB Database Connection using Motor and Beanie ODM
 """
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy.orm import declarative_base
-from app.core.config import settings
+from motor.motor_asyncio import AsyncIOMotorClient
+from beanie import init_beanie
+import os
+from dotenv import load_dotenv
 
-# Create async engine
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=settings.DEBUG,
-    future=True
-)
+load_dotenv()
 
-# Session factory
-async_session_maker = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False
-)
+# MongoDB connection settings
+MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
+DATABASE_NAME = os.getenv("DATABASE_NAME", "ai_assessment")
 
-# Base class for models
-Base = declarative_base()
+# Global client instance
+client: AsyncIOMotorClient = None
 
-async def get_db() -> AsyncSession:
-    """Dependency to get database session."""
-    async with async_session_maker() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
 
-async def init_db():
-    """Initialize database tables."""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+async def connect_db():
+    """Initialize MongoDB connection and Beanie ODM."""
+    global client
+    
+    # Import models here to avoid circular imports
+    from app.db.models import User, Exam, Question, Submission, Answer
+    
+    client = AsyncIOMotorClient(MONGODB_URL)
+    
+    await init_beanie(
+        database=client[DATABASE_NAME],
+        document_models=[User, Exam, Question, Submission, Answer]
+    )
+    
+    print(f"Connected to MongoDB: {DATABASE_NAME}")
+
+
+async def close_db():
+    """Close MongoDB connection."""
+    global client
+    if client:
+        client.close()
+        print("MongoDB connection closed.")
+
+
+async def get_database():
+    """Get database instance."""
+    return client[DATABASE_NAME]

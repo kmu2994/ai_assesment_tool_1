@@ -1,0 +1,373 @@
+import axios, { AxiosError, AxiosInstance } from 'axios';
+
+// API Base URL - uses Vite proxy in development
+const API_BASE_URL = '/api';
+
+// Create axios instance with default config
+const apiClient: AxiosInstance = axios.create({
+    baseURL: API_BASE_URL,
+    headers: {
+        'Content-Type': 'application/json',
+    },
+});
+
+// Request interceptor to add auth token
+apiClient.interceptors.request.use(
+    (config) => {
+        const token = localStorage.getItem('accessToken');
+        if (token) {
+            config.headers.Authorization = `Bearer ${token}`;
+        }
+        return config;
+    },
+    (error) => Promise.reject(error)
+);
+
+// Response interceptor to handle errors
+apiClient.interceptors.response.use(
+    (response) => response,
+    (error: AxiosError) => {
+        if (error.response?.status === 401) {
+            // Token expired or invalid - clear storage and redirect
+            localStorage.removeItem('accessToken');
+            localStorage.removeItem('user');
+            window.location.href = '/login';
+        }
+        return Promise.reject(error);
+    }
+);
+
+// Types - Updated for MongoDB (string IDs instead of numbers)
+export interface User {
+    id: string;
+    username: string;
+    email: string;
+    full_name: string | null;
+    role: 'student' | 'teacher' | 'admin';
+    accessibility_mode: boolean;
+}
+
+export interface LoginResponse {
+    access_token: string;
+    token_type: string;
+    user: User;
+}
+
+export interface RegisterData {
+    username: string;
+    email: string;
+    password: string;
+    full_name?: string;
+    role?: 'student' | 'teacher' | 'admin';
+    accessibility_mode?: boolean;
+}
+
+export interface Exam {
+    id: string;
+    title: string;
+    description: string | null;
+    is_adaptive: boolean;
+    duration_minutes: number;
+    total_questions: number;
+    total_marks: number;
+    passing_score: number;
+    is_active: boolean;
+    created_at: string;
+}
+
+export interface Question {
+    id: string;
+    question_text: string;
+    question_type: 'mcq' | 'descriptive';
+    difficulty: number;
+    points: number;
+    options: Record<string, string> | null;
+}
+
+export interface ExamSession {
+    submission_id: string;
+    exam: Exam;
+    first_question: Question | null;
+    total_questions: number;
+    duration_minutes: number;
+}
+
+export interface GradingResult {
+    success: boolean;
+    is_correct: boolean;
+    score: number;
+    feedback: string;
+    similarity?: number;
+    next_question: Question | null;
+    exam_complete: boolean;
+}
+
+export interface ExamResult {
+    total_score: number;
+    percentage: number;
+    passed: boolean;
+    summary: string;
+    question_results: Array<{
+        score: number;
+        max_points: number;
+        is_correct: boolean;
+    }>;
+}
+
+export interface StudentAnalytics {
+    user: string;
+    analytics: {
+        total_exams: number;
+        average_score: number;
+        best_score: number;
+        worst_score: number;
+    };
+    history: Array<{
+        id: string;
+        exam_title: string;
+        percentage: number;
+        submitted_at: string;
+    }>;
+}
+
+export interface TeacherDashboard {
+    total_exams_created: number;
+    total_submissions: number;
+    exams: Array<{
+        id: string;
+        title: string;
+        is_active: boolean;
+    }>;
+    student_submissions: Array<{
+        id: string;
+        student_name: string;
+        student_username: string;
+        exam_title: string;
+        percentage: number;
+        submitted_at: string | null;
+    }>;
+}
+
+export interface SubmissionDetail {
+    submission_id: string;
+    exam_title: string;
+    student_id: string;
+    status: string;
+    total_score: number;
+    max_score: number;
+    percentage: number;
+    is_finalized: boolean;
+    teacher_remarks: string | null;
+    answers: Array<{
+        answer_id: string;
+        question_text: string;
+        student_answer: string;
+        extracted_text: string | null;
+        model_answer: string | null;
+        ai_score: number;
+        current_score: number;
+        max_points: number;
+        feedback: string;
+        teacher_remarks: string | null;
+        plagiarism_detected: boolean;
+        image_url: string | null;
+    }>;
+}
+
+export interface SubmissionReview {
+    submission_id: string;
+    teacher_remarks?: string;
+    answer_reviews: Array<{
+        answer_id: string;
+        modified_score: number;
+        teacher_remarks?: string;
+    }>;
+    is_finalized: boolean;
+}
+
+export interface AdminDashboard {
+    total_users: number;
+    total_exams: number;
+    total_submissions: number;
+    users_by_role: {
+        students: number;
+        teachers: number;
+        admins: number;
+    };
+}
+
+export interface QuestionCreate {
+    question_text: string;
+    question_type?: string;
+    difficulty?: number;
+    points?: number;
+    options?: Record<string, string>;
+    correct_answer?: string;
+    model_answer?: string;
+}
+
+export interface ExamCreate {
+    title: string;
+    description?: string;
+    is_adaptive?: boolean;
+    duration_minutes?: number;
+    total_marks?: number;
+    passing_score?: number;
+    questions: QuestionCreate[];
+}
+
+// Auth API
+export const authApi = {
+    login: async (username: string, password: string): Promise<LoginResponse> => {
+        const formData = new URLSearchParams();
+        formData.append('username', username);
+        formData.append('password', password);
+
+        const response = await apiClient.post<LoginResponse>('/auth/login', formData, {
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        });
+
+        // Store token and user
+        localStorage.setItem('accessToken', response.data.access_token);
+        localStorage.setItem('user', JSON.stringify(response.data.user));
+
+        return response.data;
+    },
+
+    register: async (data: RegisterData): Promise<User> => {
+        const response = await apiClient.post<User>('/auth/register', data);
+        return response.data;
+    },
+
+    getMe: async (): Promise<User> => {
+        const response = await apiClient.get<User>('/auth/me');
+        return response.data;
+    },
+
+    logout: () => {
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+    },
+
+    getStoredUser: (): User | null => {
+        const stored = localStorage.getItem('user');
+        return stored ? JSON.parse(stored) : null;
+    },
+
+    isAuthenticated: (): boolean => {
+        return !!localStorage.getItem('accessToken');
+    },
+
+    // Admin only
+    listUsers: async (): Promise<User[]> => {
+        const response = await apiClient.get<User[]>('/auth/users');
+        return response.data;
+    },
+
+    updateUserRole: async (userId: string, newRole: string): Promise<User> => {
+        const response = await apiClient.patch<User>(`/auth/users/${userId}/role`, null, {
+            params: { new_role: newRole },
+        });
+        return response.data;
+    },
+
+    deleteUser: async (userId: string): Promise<void> => {
+        await apiClient.delete(`/auth/users/${userId}`);
+    },
+};
+
+// Exams API - Updated for MongoDB string IDs
+export const examsApi = {
+    createExam: async (data: ExamCreate): Promise<Exam> => {
+        const response = await apiClient.post<Exam>('/exams/create', data);
+        return response.data;
+    },
+
+    listAvailable: async (): Promise<Exam[]> => {
+        const response = await apiClient.get<Exam[]>('/exams/available');
+        return response.data;
+    },
+
+    getExam: async (examId: string): Promise<Exam> => {
+        const response = await apiClient.get<Exam>(`/exams/${examId}`);
+        return response.data;
+    },
+
+    startExam: async (examId: string): Promise<ExamSession> => {
+        const response = await apiClient.post<ExamSession>(`/exams/${examId}/start`);
+        return response.data;
+    },
+
+    submitAnswer: async (
+        submissionId: string,
+        questionId: string,
+        answer: string
+    ): Promise<GradingResult> => {
+        const response = await apiClient.post<GradingResult>(`/exams/${submissionId}/answer`, {
+            question_id: questionId,
+            answer,
+        });
+        return response.data;
+    },
+
+    finishExam: async (submissionId: string): Promise<ExamResult> => {
+        const response = await apiClient.post<ExamResult>(`/exams/${submissionId}/finish`);
+        return response.data;
+    },
+
+    deleteExam: async (examId: string): Promise<void> => {
+        await apiClient.delete(`/exams/${examId}`);
+    },
+
+    uploadAnswer: async (
+        submissionId: string,
+        questionId: string,
+        file: File
+    ): Promise<GradingResult> => {
+        const formData = new FormData();
+        formData.append('question_id', questionId);
+        formData.append('file', file);
+
+        const response = await apiClient.post<GradingResult>(
+            `/exams/${submissionId}/upload-answer`,
+            formData,
+            { headers: { 'Content-Type': 'multipart/form-data' } }
+        );
+        return response.data;
+    },
+
+    getSubmission: async (submissionId: string): Promise<SubmissionDetail> => {
+        const response = await apiClient.get<SubmissionDetail>(`/exams/submission/${submissionId}`);
+        return response.data;
+    },
+
+    reviewSubmission: async (data: SubmissionReview): Promise<void> => {
+        await apiClient.post('/exams/review', data);
+    },
+};
+
+// Analytics API
+export const analyticsApi = {
+    getStudentAnalytics: async (): Promise<StudentAnalytics> => {
+        const response = await apiClient.get<StudentAnalytics>('/analytics/student/me');
+        return response.data;
+    },
+
+    getExamAnalytics: async (examId: string) => {
+        const response = await apiClient.get(`/analytics/exam/${examId}`);
+        return response.data;
+    },
+
+    getTeacherDashboard: async (): Promise<TeacherDashboard> => {
+        const response = await apiClient.get<TeacherDashboard>('/analytics/dashboard/teacher');
+        return response.data;
+    },
+
+    getAdminDashboard: async (): Promise<AdminDashboard> => {
+        const response = await apiClient.get<AdminDashboard>('/analytics/dashboard/admin');
+        return response.data;
+    },
+};
+
+export default apiClient;

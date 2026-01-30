@@ -1,129 +1,99 @@
 """
-SQLAlchemy Database Models
+MongoDB Document Models using Beanie ODM
 """
-from sqlalchemy import Column, Integer, String, Float, Boolean, Text, ForeignKey, DateTime, JSON, Enum
-from sqlalchemy.orm import relationship
+from beanie import Document, PydanticObjectId
+from pydantic import Field, EmailStr
+from typing import Optional, Dict
 from datetime import datetime
-import enum
-from .database import Base
+from enum import Enum
 
-class UserRole(str, enum.Enum):
+
+class UserRole(str, Enum):
     STUDENT = "student"
     TEACHER = "teacher"
     ADMIN = "admin"
 
-class QuestionType(str, enum.Enum):
-    MCQ = "mcq"
-    DESCRIPTIVE = "descriptive"
 
-class SubmissionStatus(str, enum.Enum):
-    STARTED = "started"
-    IN_PROGRESS = "in_progress"
-    SUBMITTED = "submitted"
-    GRADED = "graded"
+class User(Document):
+    """User document model."""
+    username: str = Field(..., unique=True, index=True)
+    email: EmailStr = Field(..., unique=True, index=True)
+    password_hash: str
+    full_name: str
+    role: UserRole = UserRole.STUDENT
+    is_active: bool = True
+    accessibility_mode: bool = False
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    class Settings:
+        name = "users"
 
-# ============== USER MODEL ==============
-class User(Base):
-    __tablename__ = "users"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String(50), unique=True, index=True, nullable=False)
-    email = Column(String(100), unique=True, index=True, nullable=False)
-    password_hash = Column(String(255), nullable=False)
-    full_name = Column(String(100))
-    role = Column(String(20), default=UserRole.STUDENT.value)
-    is_active = Column(Boolean, default=True)
-    accessibility_mode = Column(Boolean, default=False)  # For disabled students
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    # Relationships
-    exams_created = relationship("Exam", back_populates="creator")
-    submissions = relationship("Submission", back_populates="student")
 
-# ============== EXAM MODEL ==============
-class Exam(Base):
-    __tablename__ = "exams"
+class Question(Document):
+    """Question document model."""
+    exam_id: PydanticObjectId
+    question_text: str
+    question_type: str = "mcq"
+    difficulty: float = 0.5
+    points: float = 1.0
+    options: Optional[Dict[str, str]] = None
+    correct_answer: Optional[str] = None
+    model_answer: Optional[str] = None
     
-    id = Column(Integer, primary_key=True, index=True)
-    title = Column(String(200), nullable=False)
-    description = Column(Text)
-    created_by = Column(Integer, ForeignKey("users.id"))
-    is_active = Column(Boolean, default=True)
-    is_adaptive = Column(Boolean, default=True)  # Enable adaptive mode
-    duration_minutes = Column(Integer, default=60)
-    total_questions = Column(Integer, default=20)
-    total_marks = Column(Float, default=100.0)
-    passing_score = Column(Float, default=40.0)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    # Relationships
-    creator = relationship("User", back_populates="exams_created")
-    questions = relationship("Question", back_populates="exam", cascade="all, delete-orphan")
-    submissions = relationship("Submission", back_populates="exam")
+    class Settings:
+        name = "questions"
 
-# ============== QUESTION MODEL ==============
-class Question(Base):
-    __tablename__ = "questions"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    exam_id = Column(Integer, ForeignKey("exams.id", ondelete="CASCADE"))
-    question_text = Column(Text, nullable=False)
-    question_type = Column(String(20), default=QuestionType.MCQ.value)
-    difficulty = Column(Float, default=0.5)  # 0.0 (easy) to 1.0 (hard)
-    points = Column(Float, default=1.0)
-    
-    # For MCQ
-    options = Column(JSON)  # {"A": "Option 1", "B": "Option 2", ...}
-    correct_answer = Column(String(10))  # e.g., "A" for MCQ
-    
-    # For Descriptive
-    model_answer = Column(Text)  # Reference answer for semantic grading
-    
-    # Relationships
-    exam = relationship("Exam", back_populates="questions")
-    answers = relationship("Answer", back_populates="question")
 
-# ============== SUBMISSION MODEL ==============
-class Submission(Base):
-    __tablename__ = "submissions"
+class Exam(Document):
+    """Exam document model."""
+    title: str = Field(..., index=True)
+    description: Optional[str] = None
+    created_by: PydanticObjectId
+    is_active: bool = True
+    is_adaptive: bool = True
+    duration_minutes: int = 60
+    total_questions: int = 10
+    total_marks: float = 100.0
+    passing_score: float = 40.0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
     
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
-    exam_id = Column(Integer, ForeignKey("exams.id"))
-    status = Column(String(20), default=SubmissionStatus.STARTED.value)
-    current_ability = Column(Float, default=0.5)  # For adaptive exams
-    total_score = Column(Float, default=0.0)
-    max_score = Column(Float, default=0.0)
-    percentage = Column(Float, default=0.0)
-    started_at = Column(DateTime, default=datetime.utcnow)
-    submitted_at = Column(DateTime)
-    
-    # Relationships
-    student = relationship("User", back_populates="submissions")
-    exam = relationship("Exam", back_populates="submissions")
-    answers = relationship("Answer", back_populates="submission", cascade="all, delete-orphan")
+    class Settings:
+        name = "exams"
 
-# ============== ANSWER MODEL ==============
-class Answer(Base):
-    __tablename__ = "answers"
+
+class Answer(Document):
+    """Answer document model."""
+    submission_id: PydanticObjectId
+    question_id: PydanticObjectId
+    student_answer: Optional[str] = None
+    image_path: Optional[str] = None
+    extracted_text: Optional[str] = None
+    is_correct: bool = False
+    score: float = 0.0
+    original_ai_score: float = 0.0
+    similarity_score: Optional[float] = None
+    plagiarism_detected: bool = False
+    feedback: Optional[str] = None
+    teacher_remarks: Optional[str] = None
+    answered_at: datetime = Field(default_factory=datetime.utcnow)
     
-    id = Column(Integer, primary_key=True, index=True)
-    submission_id = Column(Integer, ForeignKey("submissions.id", ondelete="CASCADE"))
-    question_id = Column(Integer, ForeignKey("questions.id"))
+    class Settings:
+        name = "answers"
+
+
+class Submission(Document):
+    """Submission document model."""
+    user_id: PydanticObjectId
+    exam_id: PydanticObjectId
+    status: str = "in_progress"
+    current_ability: float = 0.5
+    total_score: float = 0.0
+    max_score: float = 0.0
+    percentage: float = 0.0
+    is_finalized: bool = False
+    teacher_remarks: Optional[str] = None
+    started_at: datetime = Field(default_factory=datetime.utcnow)
+    submitted_at: Optional[datetime] = None
     
-    # Student's response
-    student_answer = Column(Text)  # Text input or MCQ option
-    image_path = Column(String(255))  # For handwritten uploads
-    extracted_text = Column(Text)  # OCR result
-    
-    # Grading
-    is_correct = Column(Boolean)
-    score = Column(Float, default=0.0)
-    similarity_score = Column(Float)  # For descriptive answers
-    feedback = Column(Text)
-    
-    answered_at = Column(DateTime, default=datetime.utcnow)
-    
-    # Relationships
-    submission = relationship("Submission", back_populates="answers")
-    question = relationship("Question", back_populates="answers")
+    class Settings:
+        name = "submissions"

@@ -1,42 +1,37 @@
 """
-Analytics and Dashboard API Routes
+Analytics and Dashboard API Routes - MongoDB Version
 """
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 from typing import List
+from beanie import PydanticObjectId
 
-from app.db.database import get_db
-from app.db.models import User, Exam, Submission, Answer
+from app.db.models import User, Exam, Submission, Answer, UserRole
 from app.agents.analytics import analytics_agent
 from .auth import get_current_user, require_role
 
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
 @router.get("/student/me")
-async def get_my_analytics(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def get_my_analytics(user: User = Depends(get_current_user)):
     """Get current student's performance analytics and history."""
-    result = await db.execute(
-        select(Submission)
-        .options(selectinload(Submission.exam))
-        .where(Submission.user_id == user.id, Submission.status == "graded")
-        .order_by(Submission.submitted_at.desc())
-    )
-    submissions = result.scalars().all()
+    submissions = await Submission.find(
+        Submission.user_id == user.id,
+        Submission.status == "graded"
+    ).sort(-Submission.submitted_at).to_list()
     
     submission_data = [{"percentage": s.percentage, "total_score": s.total_score} for s in submissions]
     analytics = analytics_agent.calculate_student_performance(submission_data)
     
-    history = [
-        {
-            "id": s.id,
-            "exam_title": s.exam.title if s.exam else "Unknown Exam",
+    # Get exam details for each submission
+    history = []
+    for s in submissions:
+        exam = await Exam.get(s.exam_id)
+        history.append({
+            "id": str(s.id),
+            "exam_title": exam.title if exam else "Unknown Exam",
             "percentage": s.percentage,
             "submitted_at": s.submitted_at
-        }
-        for s in submissions
-    ]
+        })
     
     return {
         "user": user.username, 
@@ -46,20 +41,18 @@ async def get_my_analytics(db: AsyncSession = Depends(get_db), user: User = Depe
 
 @router.get("/exam/{exam_id}")
 async def get_exam_analytics(
-    exam_id: int,
-    db: AsyncSession = Depends(get_db),
+    exam_id: str,
     user: User = Depends(require_role(["teacher", "admin"]))
 ):
     """Get exam performance analytics (Teacher/Admin only)."""
-    result = await db.execute(select(Exam).where(Exam.id == exam_id))
-    exam = result.scalar_one_or_none()
+    exam = await Exam.get(PydanticObjectId(exam_id))
     if not exam:
         raise HTTPException(status_code=404, detail="Exam not found")
     
-    result = await db.execute(
-        select(Submission).where(Submission.exam_id == exam_id, Submission.status == "graded")
-    )
-    submissions = result.scalars().all()
+    submissions = await Submission.find(
+        Submission.exam_id == exam.id,
+        Submission.status == "graded"
+    ).to_list()
     
     submission_data = [{"percentage": s.percentage} for s in submissions]
     exam_data = {"passing_score": exam.passing_score}
@@ -68,67 +61,51 @@ async def get_exam_analytics(
     return {"exam": exam.title, "analytics": analytics}
 
 @router.get("/dashboard/teacher")
-async def teacher_dashboard(
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role(["teacher", "admin"]))
-):
+async def teacher_dashboard(user: User = Depends(require_role(["teacher", "admin"]))):
     """Get teacher dashboard overview."""
-    from sqlalchemy.orm import selectinload
-    
-    result = await db.execute(select(Exam).where(Exam.created_by == user.id))
-    exams = result.scalars().all()
+    exams = await Exam.find(Exam.created_by == user.id).to_list()
     exam_ids = [e.id for e in exams]
     
-    # Get all submissions for teacher's exams with student info
-    result = await db.execute(
-        select(Submission)
-        .options(selectinload(Submission.user), selectinload(Submission.exam))
-        .where(Submission.exam_id.in_(exam_ids), Submission.status == "graded")
-        .order_by(Submission.submitted_at.desc())
-    )
-    submissions = result.scalars().all()
+    # Get all submissions for teacher's exams
+    submissions = await Submission.find(
+        {"exam_id": {"$in": exam_ids}, "status": "graded"}
+    ).sort(-Submission.submitted_at).to_list()
     
-    student_submissions = [
-        {
-            "id": s.id,
-            "student_name": s.user.full_name if s.user else "Unknown",
-            "student_username": s.user.username if s.user else "",
-            "exam_title": s.exam.title if s.exam else "Unknown",
+    # Get student and exam details for each submission
+    student_submissions = []
+    for s in submissions:
+        student = await User.get(s.user_id)
+        exam = await Exam.get(s.exam_id)
+        student_submissions.append({
+            "id": str(s.id),
+            "student_name": student.full_name if student else "Unknown",
+            "student_username": student.username if student else "",
+            "exam_title": exam.title if exam else "Unknown",
             "percentage": s.percentage,
             "submitted_at": s.submitted_at.isoformat() if s.submitted_at else None
-        }
-        for s in submissions
-    ]
+        })
     
     return {
         "total_exams_created": len(exams),
         "total_submissions": len(submissions),
-        "exams": [{"id": e.id, "title": e.title, "is_active": e.is_active} for e in exams],
+        "exams": [{"id": str(e.id), "title": e.title, "is_active": e.is_active} for e in exams],
         "student_submissions": student_submissions
     }
 
 @router.get("/dashboard/admin")
-async def admin_dashboard(
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role(["admin"]))
-):
+async def admin_dashboard(user: User = Depends(require_role(["admin"]))):
     """Get admin dashboard overview."""
-    users_result = await db.execute(select(User))
-    users = users_result.scalars().all()
-    
-    exams_result = await db.execute(select(Exam))
-    exams = exams_result.scalars().all()
-    
-    submissions_result = await db.execute(select(Submission))
-    submissions = submissions_result.scalars().all()
+    users = await User.find_all().to_list()
+    exams = await Exam.find_all().to_list()
+    submissions = await Submission.find_all().to_list()
     
     return {
         "total_users": len(users),
         "total_exams": len(exams),
         "total_submissions": len(submissions),
         "users_by_role": {
-            "students": len([u for u in users if u.role == "student"]),
-            "teachers": len([u for u in users if u.role == "teacher"]),
-            "admins": len([u for u in users if u.role == "admin"])
+            "students": len([u for u in users if u.role == UserRole.STUDENT]),
+            "teachers": len([u for u in users if u.role == UserRole.TEACHER]),
+            "admins": len([u for u in users if u.role == UserRole.ADMIN])
         }
     }
