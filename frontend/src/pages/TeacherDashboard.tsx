@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,8 @@ const TeacherDashboard = () => {
 
     useEffect(() => {
         fetchDashboard();
+        const interval = setInterval(fetchDashboard, 15000); // Pulse every 15s for "real-time" feel
+        return () => clearInterval(interval);
     }, []);
 
     const fetchDashboard = async () => {
@@ -73,16 +75,23 @@ const TeacherDashboard = () => {
         },
     ];
 
-    // Generate chart data from submissions (deterministic)
-    const activityData = [
-        { day: "Mon", submissions: 8 },
-        { day: "Tue", submissions: 15 },
-        { day: "Wed", submissions: 12 },
-        { day: "Thu", submissions: 18 },
-        { day: "Fri", submissions: 20 },
-        { day: "Sat", submissions: 6 },
-        { day: "Sun", submissions: 4 },
-    ];
+    // Calculate real-time chart data from actual submissions
+    const activityData = useMemo(() => {
+        const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+        const data = dayNames.map(day => ({ day, submissions: 0 }));
+
+        if (!dashboard?.student_submissions) return data;
+
+        dashboard.student_submissions.forEach(submission => {
+            if (!submission.submitted_at) return;
+            const date = new Date(submission.submitted_at);
+            // Convert Sunday (0) to 6, Monday (1) to 0, etc.
+            const dayIndex = (date.getDay() + 6) % 7;
+            data[dayIndex].submissions += 1;
+        });
+
+        return data;
+    }, [dashboard]);
 
     const filteredSubmissions = dashboard?.student_submissions?.filter(s =>
         s.student_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -147,28 +156,57 @@ const TeacherDashboard = () => {
                 {/* Content Grid */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     {/* Activity Chart */}
-                    <Card className="animate-fade-in-up">
-                        <CardHeader>
-                            <CardTitle className="flex items-center gap-2">
-                                <Activity className="h-5 w-5 text-accent" />
-                                Weekly Submissions
-                            </CardTitle>
-                            <CardDescription>Student activity this week</CardDescription>
+                    <Card className="animate-fade-in-up shadow-lg border-primary/10">
+                        <CardHeader className="flex flex-row items-center justify-between">
+                            <div>
+                                <CardTitle className="flex items-center gap-2">
+                                    <Activity className="h-5 w-5 text-accent" />
+                                    Weekly Submissions
+                                </CardTitle>
+                                <CardDescription>Live student activity data</CardDescription>
+                            </div>
+                            <div className="flex items-center gap-2 bg-success/10 px-2 py-1 rounded-full border border-success/20">
+                                <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
+                                <span className="text-[10px] font-bold text-success uppercase tracking-wider">Live</span>
+                            </div>
                         </CardHeader>
                         <CardContent>
                             <ResponsiveContainer width="100%" height={300}>
                                 <BarChart data={activityData}>
-                                    <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
-                                    <XAxis dataKey="day" tick={{ fontSize: 12 }} />
-                                    <YAxis tick={{ fontSize: 12 }} />
+                                    <defs>
+                                        <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" stopColor="hsl(var(--accent))" stopOpacity={0.8} />
+                                            <stop offset="100%" stopColor="hsl(var(--accent))" stopOpacity={0.3} />
+                                        </linearGradient>
+                                    </defs>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} />
+                                    <XAxis
+                                        dataKey="day"
+                                        tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
+                                        axisLine={false}
+                                        tickLine={false}
+                                    />
+                                    <YAxis
+                                        tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
+                                        axisLine={false}
+                                        tickLine={false}
+                                    />
                                     <Tooltip
+                                        cursor={{ fill: 'hsl(var(--muted))', opacity: 0.1 }}
                                         contentStyle={{
                                             backgroundColor: "hsl(var(--card))",
                                             border: "1px solid hsl(var(--border))",
-                                            borderRadius: "8px"
+                                            borderRadius: "12px",
+                                            boxShadow: "var(--shadow-lg)"
                                         }}
                                     />
-                                    <Bar dataKey="submissions" fill="hsl(var(--accent))" radius={[8, 8, 0, 0]} />
+                                    <Bar
+                                        dataKey="submissions"
+                                        fill="url(#barGradient)"
+                                        radius={[6, 6, 0, 0]}
+                                        animationDuration={1500}
+                                        animationBegin={200}
+                                    />
                                 </BarChart>
                             </ResponsiveContainer>
                         </CardContent>

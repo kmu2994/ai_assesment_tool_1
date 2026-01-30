@@ -14,7 +14,7 @@ import os
 
 from app.core.config import settings
 from app.db.database import connect_db, close_db
-from app.api import auth, exams, analytics
+from app.api import auth, exams, analytics, riva
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -48,7 +48,8 @@ app = FastAPI(
     title=settings.APP_NAME,
     description="AI-Driven Inclusive Assessment System with Adaptive Testing and Accessibility Features",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    strict_slashes=False
 )
 
 # Exception handler for validation errors
@@ -77,6 +78,11 @@ app.mount("/api/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.include_router(auth.router, prefix="/api")
 app.include_router(exams.router, prefix="/api")
 app.include_router(analytics.router, prefix="/api")
+app.include_router(riva.router, prefix="/api")
+
+@app.get("/api/version")
+async def get_version():
+    return {"version": "1.0.1", "status": "Ready", "ai_preview_route": "Active"}
 
 @app.get("/")
 async def root():

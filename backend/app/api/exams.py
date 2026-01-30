@@ -6,14 +6,157 @@ from typing import List, Optional
 from beanie import PydanticObjectId
 from datetime import datetime
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 from app.db.models import User, Exam, Question, Submission, Answer
 from app.agents.orchestrator import orchestrator
 from app.core.config import settings
 from .auth import get_current_user, require_role
-from .schemas import ExamCreate, ExamResponse, QuestionCreate, QuestionResponse, AnswerSubmit, GradingResult, SubmissionReview
+from .schemas import ExamCreate, ExamResponse, QuestionCreate, QuestionResponse, AnswerSubmit, GradingResult, SubmissionReview, ExamAICreate
+from app.core.file_processor import extract_text_from_file
+from app.agents.nvidia_generator import nvidia_gen
+import json
 
 router = APIRouter(prefix="/exams", tags=["Exams"])
+
+@router.post("/preview-ai", response_model=List[QuestionCreate])
+async def preview_exam_ai(
+    num_questions: int = Form(10),
+    difficulty_distribution: str = Form('{"easy": 0.3, "medium": 0.4, "hard": 0.3}'),
+    question_types: str = Form('["mcq", "descriptive"]'),
+    instructions: Optional[str] = Form(None),
+    file: UploadFile = File(...),
+    user: User = Depends(require_role(["teacher", "admin"]))
+):
+    """Analyze PDF and generate a preview of questions for teacher review."""
+    upload_dir = settings.UPLOAD_DIR
+    os.makedirs(upload_dir, exist_ok=True)
+    file_path = os.path.join(upload_dir, f"preview_{datetime.utcnow().timestamp()}_{file.filename}")
+    
+    with open(file_path, "wb") as buffer:
+        buffer.write(await file.read())
+        
+    try:
+        text_content = extract_text_from_file(file_path)
+        
+        if not text_content or not text_content.strip():
+            raise HTTPException(
+                status_code=400, 
+                detail="Could not extract any text from the provided file. Please ensure it's not a scanned image PDF or a corrupted file."
+            )
+
+        diff_dist = json.loads(difficulty_distribution)
+        q_types = json.loads(question_types)
+        
+        questions_data = await nvidia_gen.generate_exam(
+            study_material=text_content,
+            num_questions=num_questions,
+            difficulty_distribution=diff_dist,
+            question_types=q_types,
+            exam_title="Preview",
+            instructions=instructions
+        )
+        
+        # Clean up temporary file
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            
+        return questions_data
+    except Exception as e:
+        logger.error(f"AI Preview Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/create-ai", response_model=ExamResponse)
+async def create_exam_ai(
+    title: str = Form(...),
+    description: Optional[str] = Form(None),
+    num_questions: int = Form(10),
+    total_marks: float = Form(100.0),
+    passing_score: float = Form(40.0),
+    is_adaptive: bool = Form(True),
+    difficulty_distribution: str = Form('{"easy": 0.3, "medium": 0.4, "hard": 0.3}'),
+    question_types: str = Form('["mcq", "descriptive"]'),
+    instructions: Optional[str] = Form(None),
+    file: UploadFile = File(...),
+    user: User = Depends(require_role(["teacher", "admin"]))
+):
+    """Automatically generate an exam from study material using NVIDIA AI."""
+    # Save the file temporarily
+    upload_dir = settings.UPLOAD_DIR
+    os.makedirs(upload_dir, exist_ok=True)
+    file_path = os.path.join(upload_dir, f"material_{datetime.utcnow().timestamp()}_{file.filename}")
+    
+    with open(file_path, "wb") as buffer:
+        buffer.write(await file.read())
+        
+    try:
+        # Extract text
+        text_content = extract_text_from_file(file_path)
+        
+        # Parse JSON from Form strings
+        diff_dist = json.loads(difficulty_distribution)
+        q_types = json.loads(question_types)
+        
+        # Generate questions using NVIDIA NIM
+        questions_data = await nvidia_gen.generate_exam(
+            study_material=text_content,
+            num_questions=num_questions,
+            difficulty_distribution=diff_dist,
+            question_types=q_types,
+            exam_title=title,
+            instructions=instructions
+        )
+        
+        # Create Exam record
+        exam = Exam(
+            title=title,
+            description=description or f"AI-generated exam from {file.filename}",
+            created_by=user.id,
+            is_active=True,
+            is_adaptive=is_adaptive,
+            duration_minutes=60, # Default or add to form
+            total_questions=len(questions_data),
+            total_marks=total_marks,
+            passing_score=passing_score
+        )
+        await exam.insert()
+        
+        # Save Generated Questions
+        for q in questions_data:
+            question = Question(
+                exam_id=exam.id,
+                question_text=q["question_text"],
+                question_type=q["question_type"],
+                difficulty=q["difficulty"],
+                points=q.get("points", total_marks/len(questions_data)),
+                options=q.get("options"),
+                correct_answer=q.get("correct_answer"),
+                model_answer=q.get("model_answer"),
+                bloom_level=q.get("bloom_level", "Remembering"),
+                concept_tags=q.get("concept_tags", []),
+                adaptive_variants=q.get("adaptive_variants", [])
+            )
+            await question.insert()
+            
+        return ExamResponse(
+            id=str(exam.id),
+            title=exam.title,
+            description=exam.description,
+            is_adaptive=exam.is_adaptive,
+            total_questions=exam.total_questions,
+            total_marks=exam.total_marks,
+            passing_score=exam.passing_score,
+            created_at=exam.created_at
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to generate AI exam: {e}")
+        raise HTTPException(status_code=500, detail=f"AI Generation failed: {str(e)}")
+    finally:
+        # Cleanup file if desired, or keep as record
+        pass
 
 @router.post("/create", response_model=ExamResponse)
 async def create_exam(
@@ -61,6 +204,11 @@ async def create_exam(
 async def list_available_exams(user: User = Depends(get_current_user)):
     """List all active exams available for students."""
     exams = await Exam.find(Exam.is_active == True).to_list()
+    
+    # Get all submissions for this user to check status
+    user_submissions = await Submission.find(Submission.user_id == user.id).to_list()
+    submission_map = {s.exam_id: s.status for s in user_submissions}
+    
     return [
         ExamResponse(
             id=str(e.id),
@@ -70,7 +218,8 @@ async def list_available_exams(user: User = Depends(get_current_user)):
             duration_minutes=e.duration_minutes,
             total_questions=e.total_questions,
             total_marks=e.total_marks,
-            passing_score=e.passing_score
+            passing_score=e.passing_score,
+            user_status=submission_map.get(e.id)
         ) for e in exams
     ]
 
@@ -97,17 +246,33 @@ async def start_exam(exam_id: str, user: User = Depends(get_current_user)):
     exam = await Exam.get(PydanticObjectId(exam_id))
     if not exam:
         raise HTTPException(status_code=404, detail="Exam not found")
+    # Check if a submission already exists for this user and exam
+    existing_submission = await Submission.find_one(
+        Submission.user_id == user.id,
+        Submission.exam_id == exam.id
+    )
+    
+    if existing_submission:
+        if existing_submission.status != "in_progress":
+            raise HTTPException(
+                status_code=403, 
+                detail="You have already completed this assessment. Re-attempts are not allowed."
+            )
+        else:
+            # Optionally allow resuming an in-progress submission
+            # For now, we'll continue with the existing logic but just use the old submission
+            submission = existing_submission
+    else:
+        submission = Submission(
+            user_id=user.id,
+            exam_id=exam.id,
+            status="in_progress",
+            current_ability=0.5
+        )
+        await submission.insert()
     
     # Get questions for this exam
     questions_docs = await Question.find(Question.exam_id == exam.id).to_list()
-    
-    submission = Submission(
-        user_id=user.id,
-        exam_id=exam.id,
-        status="in_progress",
-        current_ability=0.5
-    )
-    await submission.insert()
     
     questions = [{"id": str(q.id), "difficulty": q.difficulty, "question_text": q.question_text, 
                   "question_type": q.question_type, "options": q.options, "points": q.points} for q in questions_docs]

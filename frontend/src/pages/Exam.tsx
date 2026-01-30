@@ -9,13 +9,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Clock, Mic, MicOff, Loader2, AlertCircle, Volume2, FileUp, Paperclip, X } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import { toast } from "sonner";
-import { examsApi, ExamSession, Question, GradingResult } from "@/lib/api";
+import { examsApi, ExamSession, Question } from "@/lib/api";
 import { useAccessibility } from "@/hooks/useAccessibility";
 
 const Exam = () => {
     const { examId } = useParams<{ examId: string }>();
     const navigate = useNavigate();
-    const { speak, textToSpeech } = useAccessibility();
+    const { speak, textToSpeech, isRivaEnabled } = useAccessibility();
 
     const [session, setSession] = useState<ExamSession | null>(null);
     const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
@@ -26,7 +26,6 @@ const Exam = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
-    const [feedback, setFeedback] = useState<GradingResult | null>(null);
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [filePreview, setFilePreview] = useState<string | null>(null);
 
@@ -116,22 +115,18 @@ const Exam = () => {
                 );
             }
 
-            setFeedback(result);
             setQuestionsAnswered(prev => prev + 1);
 
-            // Show feedback briefly
-            setTimeout(() => {
-                if (result.exam_complete) {
-                    handleFinishExam();
-                } else if (result.next_question) {
-                    setCurrentQuestion(result.next_question);
-                    setSelectedAnswer("");
-                    setDescriptiveAnswer("");
-                    setSelectedFile(null);
-                    setFilePreview(null);
-                    setFeedback(null);
-                }
-            }, 2000);
+            if (result.exam_complete) {
+                handleFinishExam();
+            } else if (result.next_question) {
+                setCurrentQuestion(result.next_question);
+                setSelectedAnswer("");
+                setDescriptiveAnswer("");
+                setSelectedFile(null);
+                setFilePreview(null);
+                setFeedback(null);
+            }
 
         } catch (error: unknown) {
             const err = error as { response?: { data?: { detail?: string } } };
@@ -206,7 +201,13 @@ const Exam = () => {
         setFilePreview(null);
     };
 
-    const toggleRecording = () => {
+    const toggleRecording = async () => {
+        if (isRivaEnabled) {
+            handleRivaRecording();
+            return;
+        }
+
+        // Browser Fallback (Existing logic)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in (window as any))) {
             toast.error("Voice input is not supported in your browser");
@@ -246,6 +247,72 @@ const Exam = () => {
         recognition.start();
         setIsRecording(true);
         toast.success("Listening... Speak your answer");
+    };
+
+    const typeEffect = (text: string) => {
+        const words = text.split(' ');
+        let currentWordIndex = 0;
+
+        const interval = setInterval(() => {
+            if (currentWordIndex < words.length) {
+                setDescriptiveAnswer(prev => prev + (prev ? ' ' : '') + words[currentWordIndex]);
+                currentWordIndex++;
+            } else {
+                clearInterval(interval);
+            }
+        }, 150); // Speed of 150ms per word for "meaningful" slow typing
+    };
+
+    const handleRivaRecording = async () => {
+        if (isRecording) {
+            setIsRecording(false);
+            return;
+        }
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const mediaRecorder = new MediaRecorder(stream);
+            const audioChunks: Blob[] = [];
+
+            mediaRecorder.ondataavailable = (event) => {
+                audioChunks.push(event.data);
+            };
+
+            mediaRecorder.onstop = async () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                const formData = new FormData();
+                formData.append('file', audioBlob, 'recording.wav');
+
+                try {
+                    const response = await fetch('/api/accessibility/transcribe', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                        },
+                        body: formData
+                    });
+                    const data = await response.json();
+                    if (data.text) {
+                        typeEffect(data.text);
+                        toast.success("Riva transcribed your answer!");
+                    }
+                } catch (e) {
+                    toast.error("Riva transcription failed");
+                }
+
+                // Stop all tracks
+                stream.getTracks().forEach(track => track.stop());
+            };
+
+            mediaRecorder.start();
+            setIsRecording(true);
+            toast.success("Riva Listening... Speak clearly!");
+
+            // Auto stop after 10s for demo or wait for manual stop
+            // setTimeout(() => { if (mediaRecorder.state === 'recording') mediaRecorder.stop(); }, 10000);
+        } catch (e) {
+            toast.error("Microphone access denied");
+        }
     };
 
     const getDifficultyColor = (difficulty: number) => {
@@ -423,14 +490,14 @@ const Exam = () => {
                                                     key={key}
                                                     className={`
                                                         flex items-center space-x-3 p-5 border-2 rounded-xl transition-all cursor-pointer group
-                                                        ${selectedAnswer === value ? 'border-primary bg-primary/5 shadow-md' : 'border-muted hover:border-primary/50'}
+                                                        ${selectedAnswer === key ? 'border-primary bg-primary/5 shadow-md' : 'border-muted hover:border-primary/50'}
                                                     `}
-                                                    onClick={() => setSelectedAnswer(value)}
+                                                    onClick={() => setSelectedAnswer(key)}
                                                 >
-                                                    <RadioGroupItem value={value} id={`option-${key}`} className="sr-only" />
+                                                    <RadioGroupItem value={key} id={`option-${key}`} className="sr-only" />
                                                     <div className={`
                                                         w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold text-sm transition-colors
-                                                        ${selectedAnswer === value ? 'bg-primary border-primary text-primary-foreground' : 'border-muted-foreground/30 group-hover:border-primary/50'}
+                                                        ${selectedAnswer === key ? 'bg-primary border-primary text-primary-foreground' : 'border-muted-foreground/30 group-hover:border-primary/50'}
                                                     `}>
                                                         {key}
                                                     </div>
@@ -526,22 +593,6 @@ const Exam = () => {
                                         </div>
                                     )}
 
-                                    {feedback && (
-                                        <div className={`
-                                            p-5 rounded-2xl border-l-8 animate-slide-in-right
-                                            ${feedback.is_correct ? 'bg-success/10 border-success text-success' : 'bg-warning/10 border-warning text-amber-900 dark:text-amber-500'}
-                                        `}>
-                                            <div className="flex items-center gap-3 mb-2">
-                                                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${feedback.is_correct ? 'bg-success text-white' : 'bg-warning text-white'}`}>
-                                                    {feedback.is_correct ? '✓' : '!'}
-                                                </div>
-                                                <p className="font-bold text-lg">
-                                                    {feedback.is_correct ? 'Correct! Well done.' : 'Received Feedback'}
-                                                </p>
-                                            </div>
-                                            <p className="text-base pl-11 italic">{feedback.feedback}</p>
-                                        </div>
-                                    )}
                                 </CardContent>
                                 <div className="p-6 lg:p-8 bg-muted/20 border-t flex flex-col sm:flex-row justify-between items-center gap-4">
                                     <Button

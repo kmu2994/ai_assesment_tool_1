@@ -47,6 +47,9 @@ class QuestionCreate(BaseModel):
     options: Optional[Dict[str, str]] = None
     correct_answer: Optional[str] = None
     model_answer: Optional[str] = None
+    bloom_level: str = "Remembering"
+    concept_tags: List[str] = []
+    adaptive_variants: List[Dict[str, Any]] = []
 
 class QuestionResponse(BaseModel):
     id: str
@@ -55,9 +58,22 @@ class QuestionResponse(BaseModel):
     difficulty: float
     points: float
     options: Optional[Dict[str, str]] = None
+    bloom_level: Optional[str] = None
+    concept_tags: List[str] = []
+    adaptive_variants: List[Dict[str, Any]] = []
     
     class Config:
         from_attributes = True
+
+class ExamAICreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    num_questions: int = 10
+    total_marks: float = 100.0
+    passing_score: float = 40.0
+    difficulty_distribution: Dict[str, float] = {"easy": 0.3, "medium": 0.4, "hard": 0.3}
+    question_types: List[str] = ["mcq", "descriptive"]
+    is_adaptive: bool = True
 
 class ExamCreate(BaseModel):
     title: str
@@ -79,6 +95,7 @@ class ExamResponse(BaseModel):
     passing_score: float = 40.0
     is_active: bool = True
     created_at: Optional[datetime] = None
+    user_status: Optional[str] = None # New field to track if user took the exam
     
     class Config:
         from_attributes = True

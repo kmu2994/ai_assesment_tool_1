@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, PlayCircle, Clock, Target, BookOpen } from "lucide-react";
+import { Loader2, PlayCircle, Clock, Target, BookOpen, CheckCircle, Lock } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import { examsApi, Exam } from "@/lib/api";
 import { toast } from "sonner";
@@ -69,11 +69,18 @@ const ExamsList = () => {
                                         <div className="bg-primary/10 w-12 h-12 rounded-xl flex items-center justify-center mb-4">
                                             <BookOpen className="h-6 w-6 text-primary" aria-hidden="true" />
                                         </div>
-                                        {exam.is_adaptive && (
-                                            <span className="bg-accent/10 text-accent text-xs font-semibold px-2 py-1 rounded-full">
-                                                Adaptive
-                                            </span>
-                                        )}
+                                        <div className="flex gap-2">
+                                            {exam.user_status && exam.user_status !== "in_progress" && (
+                                                <span className="bg-success/10 text-success text-xs font-semibold px-2 py-1 rounded-full flex items-center gap-1">
+                                                    <CheckCircle className="h-3 w-3" /> Completed
+                                                </span>
+                                            )}
+                                            {exam.is_adaptive && (
+                                                <span className="bg-accent/10 text-accent text-xs font-semibold px-2 py-1 rounded-full">
+                                                    Adaptive
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
                                     <CardTitle className="text-xl">{exam.title}</CardTitle>
                                     <CardDescription className="line-clamp-2">
@@ -98,9 +105,25 @@ const ExamsList = () => {
                                     <Button
                                         onClick={() => navigate(`/exam/${exam.id}`)}
                                         className="w-full gap-2"
+                                        disabled={Boolean(exam.user_status && exam.user_status !== "in_progress")}
+                                        variant={exam.user_status && exam.user_status !== "in_progress" ? "secondary" : "default"}
                                     >
-                                        <PlayCircle className="h-4 w-4" aria-hidden="true" />
-                                        Start Exam
+                                        {exam.user_status && exam.user_status !== "in_progress" ? (
+                                            <>
+                                                <Lock className="h-4 w-4" aria-hidden="true" />
+                                                Attempt Locked
+                                            </>
+                                        ) : exam.user_status === "in_progress" ? (
+                                            <>
+                                                <PlayCircle className="h-4 w-4" aria-hidden="true" />
+                                                Resume Exam
+                                            </>
+                                        ) : (
+                                            <>
+                                                <PlayCircle className="h-4 w-4" aria-hidden="true" />
+                                                Start Exam
+                                            </>
+                                        )}
                                     </Button>
                                 </CardContent>
                             </Card>

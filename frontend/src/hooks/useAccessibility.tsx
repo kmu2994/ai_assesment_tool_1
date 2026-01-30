@@ -7,6 +7,8 @@ interface AccessibilityContextType {
     toggleHighContrast: () => void;
     speak: (text: string) => void;
     stopSpeaking: () => void;
+    isRivaEnabled: boolean;
+    setIsRivaEnabled: (enabled: boolean) => void;
 }
 
 const AccessibilityContext = createContext<AccessibilityContextType | undefined>(undefined);
@@ -44,19 +46,42 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
         setHighContrast(prev => !prev);
     };
 
-    const speak = useCallback((text: string) => {
-        if (!textToSpeech || !('speechSynthesis' in window)) return;
+    const [isRivaEnabled, setIsRivaEnabled] = useState(false);
 
-        // Cancel any ongoing speech
+    const speak = useCallback(async (text: string) => {
+        if (!textToSpeech) return;
+
+        // Try NVIDIA Riva via backend if enabled/available
+        if (isRivaEnabled) {
+            try {
+                const response = await fetch('/api/accessibility/speak', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                    },
+                    body: JSON.stringify({ text })
+                });
+
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = URL.createObjectURL(blob);
+                    const audio = new Audio(url);
+                    audio.play();
+                    return;
+                }
+            } catch (e) {
+                console.error("Riva TTS failed, falling back to browser.", e);
+            }
+        }
+
+        // Browser Fallback
+        if (!('speechSynthesis' in window)) return;
         window.speechSynthesis.cancel();
-
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.rate = 0.9;
-        utterance.pitch = 1;
-        utterance.volume = 1;
-
         window.speechSynthesis.speak(utterance);
-    }, [textToSpeech]);
+    }, [textToSpeech, isRivaEnabled]);
 
     const stopSpeaking = useCallback(() => {
         if ('speechSynthesis' in window) {
@@ -72,7 +97,9 @@ export function AccessibilityProvider({ children }: { children: ReactNode }) {
                 toggleTextToSpeech,
                 toggleHighContrast,
                 speak,
-                stopSpeaking
+                stopSpeaking,
+                isRivaEnabled,
+                setIsRivaEnabled
             }}
         >
             {children}

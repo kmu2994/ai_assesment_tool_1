@@ -3,6 +3,7 @@ Application Configuration
 """
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+from typing import Optional
 import os
 
 class Settings(BaseSettings):
@@ -23,7 +24,13 @@ class Settings(BaseSettings):
     
     # File Upload
     UPLOAD_DIR: str = "./data/uploads"
-    MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
+    MAX_FILE_SIZE: int = 20 * 1024 * 1024  # 20MB
+    
+    # NVIDIA AI
+    NVIDIA_API_KEY: Optional[str] = None
+    NVIDIA_LLM_MODEL: str = "meta/llama-3.1-70b-instruct"
+    NVIDIA_EMBED_MODEL: str = "nvidia/nv-embedqa-e5-v5"
+    RIVA_URL: str = "http://localhost:50051"
     
     class Config:
         env_file = ".env"

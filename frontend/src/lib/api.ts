@@ -73,6 +73,7 @@ export interface Exam {
     passing_score: number;
     is_active: boolean;
     created_at: string;
+    user_status?: string;
 }
 
 export interface Question {
@@ -281,6 +282,20 @@ export const authApi = {
 export const examsApi = {
     createExam: async (data: ExamCreate): Promise<Exam> => {
         const response = await apiClient.post<Exam>('/exams/create', data);
+        return response.data;
+    },
+
+    createExamAI: async (formData: FormData): Promise<Exam> => {
+        const response = await apiClient.post<Exam>('/exams/create-ai', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        return response.data;
+    },
+
+    previewExamAI: async (formData: FormData): Promise<QuestionCreate[]> => {
+        const response = await apiClient.post<QuestionCreate[]>('/exams/preview-ai', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
         return response.data;
     },
 

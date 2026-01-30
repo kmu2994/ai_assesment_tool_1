@@ -1,147 +1,78 @@
 import logging
-import re
+import json
 from typing import Dict, Any
+from openai import OpenAI
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 class SemanticGradingAgent:
     """
-    Agent responsible for grading descriptive answers.
-    MOCKED: Uses word overlap instead of heavy Sentence-BERT for immediate project demonstration.
+    Agent responsible for grading descriptive answers using NVIDIA NIM.
+    Matches student answers against model answers with semantic depth.
     """
     
-    _instance = None
-    
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-    
     def __init__(self):
-        # Mock model loading
-        if not hasattr(self, '_initialized'):
-            logger.info("Semantic grading (Mocked Mode) initialized using word overlap.")
-            self._initialized = True
-    
-    def _get_overlap(self, student_text: str, model_text: str) -> Dict[str, Any]:
-        """Calculate recall-based keyword overlap."""
-        if not student_text or not model_text:
-            return {"similarity": 0.0, "keywords_matched": []}
-        
-        # Filter out common stop words for better keyword matching
-        stop_words = {'the', 'is', 'at', 'which', 'on', 'and', 'a', 'an', 'in', 'to', 'for', 'with', 'of'}
-        
-        student_words = set(re.findall(r'\w+', student_text.lower()))
-        model_words = set(re.findall(r'\w+', model_text.lower()))
-        
-        # Keywords are model words that aren't stop words
-        keywords = model_words - stop_words
-        
-        if not keywords:
-            # If model answer is very short (like one word), just compare directly
-            intersection = student_words.intersection(model_words)
-            similarity = len(intersection) / len(model_words) if model_words else 0.0
-            return {"similarity": similarity, "keywords_matched": list(intersection)}
-            
-        intersection = student_words.intersection(keywords)
-        
-        # Calculate Recall (how many model keywords did the student cover?)
-        # This is better for "Key Points" than Jaccard similarity
-        similarity = len(intersection) / len(keywords)
-        
-        return {
-            "similarity": similarity,
-            "keywords_matched": list(intersection)
-        }
+        self.api_key = settings.NVIDIA_API_KEY
+        self.base_url = "https://integrate.api.nvidia.com/v1"
+        self.client = OpenAI(api_key=self.api_key, base_url=self.base_url) if self.api_key else None
+        self.model = settings.NVIDIA_LLM_MODEL
+        logger.info(f"NVIDIA Semantic Grader initialized: {'Configured' if self.client else 'Mock Mode'}")
 
     def grade_answer(self, student_answer: str, model_answer: str, max_points: float = 1.0) -> Dict[str, Any]:
         """
-        Grade a descriptive answer by matching against model answer keywords.
+        Grade a descriptive answer using NVIDIA NIM.
         """
         if not student_answer or not student_answer.strip():
-            return {
-                "score": 0.0,
-                "similarity": 0.0,
-                "percentage": 0,
-                "feedback": "No answer provided.",
-                "grade": "F"
-            }
+            return {"score": 0.0, "percentage": 0, "feedback": "No answer provided.", "grade": "F"}
         
-        if not model_answer or not model_answer.strip():
-            return {
-                "score": 0.0,
-                "similarity": 0.0,
-                "percentage": 0,
-                "feedback": "No reference answer available for comparison.",
-                "grade": "N/A"
-            }
+        if not self.client:
+            # Fallback to simple matching if no API key
+            return self._mock_grade(student_answer, model_answer, max_points)
+
+        prompt = f"""
+        Compare the student's answer to the model answer and provide a grade.
         
+        Model Answer: {model_answer}
+        Student's Answer: {student_answer}
+        
+        Criteria:
+        - Check for semantic similarity and key concept coverage.
+        - Ignore minor grammatical errors.
+        - Return a JSON object with:
+            - score (float out of {max_points})
+            - percentage (int 0-100)
+            - feedback (string explaining the score)
+            - grade (A+, A, B, C, D, or F)
+        """
+
         try:
-            # Analysis
-            analysis = self._get_overlap(student_answer, model_answer)
-            similarity = analysis["similarity"]
-            matched_keywords = analysis["keywords_matched"]
-            
-            # Grade based on keyword coverage
-            if similarity >= 0.85:
-                percentage = 100
-                grade = "A+"
-                feedback = f"Excellent coverage of key concepts! You matched several key points including: {', '.join(matched_keywords[:3])}."
-            elif similarity >= 0.65:
-                percentage = 85
-                grade = "A"
-                feedback = "Great job! You identified most of the critical points requested."
-            elif similarity >= 0.45:
-                percentage = 70
-                grade = "B"
-                feedback = "Good response. You've hit the main concepts, though some depth could be added."
-            elif similarity >= 0.25:
-                percentage = 50
-                grade = "C"
-                feedback = "Partial understanding. You mentioned some relevant terms, but missed core details."
-            elif similarity >= 0.1:
-                percentage = 25
-                grade = "D"
-                feedback = "Basic effort. Only 1-2 keywords were identified. Review the topic again."
-            else:
-                percentage = 0
-                grade = "F"
-                feedback = "Your answer does not address the required key points for this question."
-            
-            # Calculate actual score
-            score = (percentage / 100) * max_points
-            
-            return {
-                "score": round(score, 2),
-                "similarity": round(similarity, 4),
-                "percentage": percentage,
-                "feedback": feedback,
-                "grade": grade,
-                "matched_count": len(matched_keywords)
-            }
-            
-        except Exception as e:
-            logger.error(f"Grading error: {e}")
-            return {
-                "score": 0.0,
-                "similarity": 0.0,
-                "percentage": 0,
-                "feedback": f"Error during grading: {str(e)}",
-                "grade": "Error"
-            }
-    
-    def batch_grade(self, answers: list) -> list:
-        """Grade multiple answers in batch."""
-        results = []
-        for answer in answers:
-            result = self.grade_answer(
-                student_answer=answer.get('student_answer', ''),
-                model_answer=answer.get('model_answer', ''),
-                max_points=answer.get('max_points', 1.0)
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                response_format={ "type": "json_object" }
             )
-            results.append(result)
-        return results
+            return json.loads(response.choices[0].message.content)
+        except Exception as e:
+            logger.error(f"NVIDIA Grading Error: {e}")
+            return self._mock_grade(student_answer, model_answer, max_points)
 
+    def _mock_grade(self, student_answer: str, model_answer: str, max_points: float) -> Dict[str, Any]:
+        """Simple keyword-based fallback grading."""
+        student_words = set(student_answer.lower().split())
+        model_words = set(model_answer.lower().split())
+        overlap = len(student_words.intersection(model_words))
+        ratio = overlap / len(model_words) if model_words else 0
+        
+        percentage = int(ratio * 100)
+        score = round(ratio * max_points, 2)
+        
+        return {
+            "score": score,
+            "percentage": percentage,
+            "feedback": "Graded via fallback keyword matching.",
+            "grade": "C" if ratio > 0.4 else "F"
+        }
 
-# Singleton instance
 grading_agent = SemanticGradingAgent()

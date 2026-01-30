@@ -28,14 +28,7 @@ class AdaptiveMCQAgent:
     ) -> Optional[Dict]:
         """
         Select the next question based on student's current ability level.
-        
-        Args:
-            available_questions: List of question dictionaries with 'id' and 'difficulty'
-            current_ability: Student's current estimated ability (0.0 to 1.0)
-            answered_question_ids: List of already answered question IDs to exclude
-            
-        Returns:
-            The best matching question or None if no questions available
+        Considers AI-generated adaptive variants for better granularity.
         """
         if not available_questions:
             return None
@@ -50,30 +43,39 @@ class AdaptiveMCQAgent:
         if not available_questions:
             return None
         
-        # Find question with difficulty closest to student ability
-        # This is the "Zone of Proximal Development" concept
-        best_question = None
+        # Find question (or its variant) with difficulty closest to student ability
+        best_match = None
         min_distance = float('inf')
         
-        for question in available_questions:
-            difficulty = question.get('difficulty', 0.5)
-            distance = abs(difficulty - current_ability)
+        for base_question in available_questions:
+            # Check the base question difficulty
+            base_diff = base_question.get('difficulty', 0.5)
+            dist = abs(base_diff - current_ability)
             
-            if distance < min_distance:
-                min_distance = distance
-                best_question = question
+            # Check all variants (if any)
+            variants = base_question.get('adaptive_variants', [])
+            current_best_text = base_question.get('question_text')
+            current_best_diff = base_diff
+            
+            for var in variants:
+                var_diff = var.get('difficulty', 0.5)
+                var_dist = abs(var_diff - current_ability)
+                if var_dist < dist:
+                    dist = var_dist
+                    current_best_text = var.get('question_text')
+                    current_best_diff = var_diff
+            
+            if dist < min_distance:
+                min_distance = dist
+                # Construct the selected question object
+                best_match = {
+                    **base_question,
+                    "question_text": current_best_text,
+                    "difficulty": current_best_diff
+                }
         
-        # If multiple questions have similar difficulty, add some randomness
-        close_questions = [
-            q for q in available_questions 
-            if abs(q.get('difficulty', 0.5) - current_ability) <= min_distance + 0.1
-        ]
-        
-        if len(close_questions) > 1:
-            best_question = random.choice(close_questions)
-        
-        logger.info(f"Selected question with difficulty {best_question.get('difficulty')} for ability {current_ability}")
-        return best_question
+        logger.info(f"Adaptive Select: Difficulty {best_match.get('difficulty')} (Ability: {current_ability})")
+        return best_match
     
     def update_ability(
         self, 

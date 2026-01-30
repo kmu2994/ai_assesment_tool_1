@@ -3,7 +3,7 @@ MongoDB Document Models using Beanie ODM
 """
 from beanie import Document, PydanticObjectId
 from pydantic import Field, EmailStr
-from typing import Optional, Dict
+from typing import Optional, Dict, List, Any
 from datetime import datetime
 from enum import Enum
 
@@ -34,11 +34,16 @@ class Question(Document):
     exam_id: PydanticObjectId
     question_text: str
     question_type: str = "mcq"
-    difficulty: float = 0.5
+    difficulty: float = 0.5  # 0.0 to 1.0
     points: float = 1.0
     options: Optional[Dict[str, str]] = None
     correct_answer: Optional[str] = None
     model_answer: Optional[str] = None
+    
+    # NVIDIA AI Metadata
+    concept_tags: List[str] = []
+    bloom_level: str = "Remembering" # Remembering, Understanding, Applying, Analyzing, Evaluating, Creating
+    adaptive_variants: List[Dict[str, Any]] = [] # [{difficulty: 0.2, text: "..."}, ...]
     
     class Settings:
         name = "questions"

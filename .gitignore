@@ -14,11 +14,9 @@ __pycache__/
 .env.local
 .env.*.local
 
-# Database and Storage
+# Database
 *.db
 backend/data/*.db
-backend/data/uploads/
-backend/uploads/
 
 # Build outputs
 dist/
@@ -46,3 +44,7 @@ htmlcov/
 
 # Docker cache (optional - keep docker files)
 .docker/
+
+# Uploads
+backend/uploads/
+backend/data/uploads/
