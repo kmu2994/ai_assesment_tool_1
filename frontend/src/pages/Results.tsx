@@ -31,6 +31,30 @@ const Results = () => {
     const userName = JSON.parse(localStorage.getItem('user') || '{}').full_name || "Student";
     const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
+    const handleShare = async () => {
+        const shareData = {
+            title: `Assessment Result: ${result.exam_title || 'AI Assessment'}`,
+            text: `I scored ${overallScore}% on my ${result.exam_title || 'assessment'}! View my result here.`,
+            url: window.location.href,
+        };
+
+        try {
+            if (navigator.share && navigator.canShare(shareData)) {
+                await navigator.share(shareData);
+                toast.success("Shared successfully!");
+            } else {
+                // Fallback to copy link
+                await navigator.clipboard.writeText(window.location.href);
+                toast.success("Result link copied to clipboard!");
+            }
+        } catch (error) {
+            if ((error as Error).name !== 'AbortError') {
+                console.error("Error sharing:", error);
+                toast.error("Could not share result.");
+            }
+        }
+    };
+
     const handleDownloadPDF = async () => {
         if (!reportTemplateRef.current) return;
 
@@ -88,7 +112,7 @@ const Results = () => {
                             {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                             Download AI-ASSESSMENT
                         </Button>
-                        <Button variant="outline" className="gap-2">
+                        <Button onClick={handleShare} variant="outline" className="gap-2">
                             <Share2 className="h-4 w-4" />
                             Share
                         </Button>

@@ -28,6 +28,7 @@ const Exam = () => {
     const [isRecording, setIsRecording] = useState(false);
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [filePreview, setFilePreview] = useState<string | null>(null);
+    const [proctorWarnings, setProctorWarnings] = useState(0);
 
     // Start exam on mount
     useEffect(() => {
@@ -56,7 +57,74 @@ const Exam = () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [timeLeft]);
 
-    // Speak question when it changes
+    // Proctoring Logic
+    useEffect(() => {
+        if (!session?.exam.proctoring_enabled) return;
+
+        const handleVisibilityChange = () => {
+            if (document.hidden) {
+                setProctorWarnings(prev => {
+                    const next = prev + 1;
+                    if (next >= 5) {
+                        toast.error("Infraction Limit Reached: Finalizing Exam", {
+                            description: "Too many tab switches detected."
+                        });
+                        handleFinishExam();
+                    } else {
+                        toast.warning(`Proctoring Alert: Tab Switch Detected (${next}/5)`, {
+                            description: "Please stay on this page. Repeated infractions will terminate the exam."
+                        });
+                    }
+                    return next;
+                });
+            }
+        };
+
+        const preventCopyPaste = (e: ClipboardEvent) => {
+            e.preventDefault();
+            toast.error("Proctoring Alert: Copy-Paste is disabled for this assessment.");
+        };
+
+        const preventContextMenu = (e: MouseEvent) => {
+            e.preventDefault();
+        };
+
+        // Enforce Fullscreen
+        const enterFullscreen = () => {
+            if (document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen().catch(() => {
+                    toast.error("Proctoring Alert: Fullscreen is required. Please re-enable it.");
+                });
+            }
+        };
+
+        enterFullscreen();
+
+        document.addEventListener("visibilitychange", handleVisibilityChange);
+        document.addEventListener("copy", preventCopyPaste);
+        document.addEventListener("paste", preventCopyPaste);
+        document.addEventListener("contextmenu", preventContextMenu);
+
+        // Warning on browser back button/close
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            e.preventDefault();
+            e.returnValue = '';
+            return '';
+        };
+        window.addEventListener('beforeunload', handleBeforeUnload);
+
+        return () => {
+            document.removeEventListener("visibilitychange", handleVisibilityChange);
+            document.removeEventListener("copy", preventCopyPaste);
+            document.removeEventListener("paste", preventCopyPaste);
+            document.removeEventListener("contextmenu", preventContextMenu);
+            window.removeEventListener('beforeunload', handleBeforeUnload);
+            if (document.fullscreenElement) {
+                document.exitFullscreen().catch(() => { });
+            }
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [session?.exam.proctoring_enabled]);
     useEffect(() => {
         if (currentQuestion && textToSpeech) {
             speak(currentQuestion.question_text);
@@ -125,7 +193,6 @@ const Exam = () => {
                 setDescriptiveAnswer("");
                 setSelectedFile(null);
                 setFilePreview(null);
-                setFeedback(null);
             }
 
         } catch (error: unknown) {
@@ -169,7 +236,6 @@ const Exam = () => {
                 setDescriptiveAnswer("");
                 setSelectedFile(null);
                 setFilePreview(null);
-                setFeedback(null);
             }
         } catch (error: unknown) {
             const err = error as { response?: { data?: { detail?: string } } };
@@ -436,6 +502,16 @@ const Exam = () => {
                                 </div>
                                 <Progress value={progress} className="h-2" aria-label={`Progress: ${Math.round(progress)}%`} />
                             </div>
+
+                            {session?.exam.proctoring_enabled && (
+                                <div className="mt-4 flex items-center justify-between p-2 bg-destructive/10 border border-destructive/20 rounded-lg animate-pulse">
+                                    <div className="flex items-center gap-2">
+                                        <div className="h-2 w-2 bg-destructive rounded-full" />
+                                        <span className="text-[10px] font-bold uppercase tracking-wider text-destructive">Proctorium Protocol Active</span>
+                                    </div>
+                                    <span className="text-[10px] font-medium text-destructive">Infractions: {proctorWarnings}/5</span>
+                                </div>
+                            )}
                         </div>
 
                         {/* Question Card */}

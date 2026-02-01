@@ -14,14 +14,16 @@ __pycache__/
 .env.local
 .env.*.local
 
-# Database
+# Database & Local Storage
 *.db
-backend/data/*.db
+backend/data/
+backend/uploads/
 
 # Build outputs
 dist/
 build/
 *.egg-info/
+*.tsbuildinfo
 
 # IDE
 .vscode/
@@ -44,7 +46,3 @@ htmlcov/
 
 # Docker cache (optional - keep docker files)
 .docker/
-
-# Uploads
-backend/uploads/
-backend/data/uploads/

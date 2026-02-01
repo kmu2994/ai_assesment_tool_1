@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,18 +13,57 @@ import { toast } from "sonner";
 interface CreateExamModalProps {
     onClose: () => void;
     onSuccess: () => void;
+    examId?: string;
 }
 
-const CreateExamModal = ({ onClose, onSuccess }: CreateExamModalProps) => {
+const CreateExamModal = ({ onClose, onSuccess, examId }: CreateExamModalProps) => {
     const [isLoading, setIsLoading] = useState(false);
     const [editingIndex, setEditingIndex] = useState<number | null>(null);
     const [activeTab, setActiveTab] = useState("manual");
+
+    useEffect(() => {
+        if (examId) {
+            fetchExamDetails();
+        }
+    }, [examId]);
+
+    const fetchExamDetails = async () => {
+        setIsLoading(true);
+        try {
+            const data = await examsApi.getExamDetails(examId!);
+            setExamData({
+                title: data.title,
+                description: data.description || "",
+                is_adaptive: data.is_adaptive,
+                duration_minutes: data.duration_minutes,
+                total_marks: data.total_marks,
+                passing_score: data.passing_score,
+                questions: data.questions.map(q => ({
+                    question_text: q.question_text,
+                    question_type: q.question_type,
+                    difficulty: q.difficulty,
+                    points: q.points,
+                    options: q.options || { A: "", B: "", C: "", D: "" },
+                    correct_answer: q.correct_answer || "",
+                    model_answer: q.model_answer || ""
+                }))
+            });
+            setActiveTab("manual");
+        } catch (error) {
+            toast.error("Failed to fetch exam details");
+            onClose();
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     // --- Manual State ---
     const [examData, setExamData] = useState<ExamCreate>({
         title: "",
         description: "",
         is_adaptive: true,
+        exam_mode: 'mixed',
+        proctoring_enabled: false,
         duration_minutes: 60,
         total_marks: 100,
         passing_score: 40,
@@ -48,6 +87,8 @@ const CreateExamModal = ({ onClose, onSuccess }: CreateExamModalProps) => {
         total_marks: 100,
         passing_score: 40,
         is_adaptive: true,
+        exam_mode: 'mixed' as 'mixed' | 'competitive_mcq' | 'only_descriptive',
+        proctoring_enabled: false,
         difficulty_distribution: { easy: 0.3, medium: 0.4, hard: 0.3 },
         question_types: ["mcq", "descriptive"],
         instructions: ""
@@ -76,6 +117,8 @@ const CreateExamModal = ({ onClose, onSuccess }: CreateExamModalProps) => {
         formData.append("num_questions", String(aiParams.num_questions));
         formData.append("difficulty_distribution", JSON.stringify(aiParams.difficulty_distribution));
         formData.append("question_types", JSON.stringify(aiParams.question_types));
+        formData.append("exam_mode", aiParams.exam_mode);
+        formData.append("proctoring_enabled", String(aiParams.proctoring_enabled));
         if (aiParams.instructions) {
             formData.append("instructions", aiParams.instructions);
         }
@@ -90,6 +133,8 @@ const CreateExamModal = ({ onClose, onSuccess }: CreateExamModalProps) => {
                 total_marks: aiParams.total_marks,
                 passing_score: aiParams.passing_score,
                 is_adaptive: aiParams.is_adaptive,
+                exam_mode: aiParams.exam_mode,
+                proctoring_enabled: aiParams.proctoring_enabled,
                 questions: previewQuestions
             }));
 
@@ -157,11 +202,16 @@ const CreateExamModal = ({ onClose, onSuccess }: CreateExamModalProps) => {
 
         setIsLoading(true);
         try {
-            await examsApi.createExam(examData);
-            toast.success("Exam created successfully!");
+            if (examId) {
+                await examsApi.updateExam(examId, examData);
+                toast.success("Exam updated successfully!");
+            } else {
+                await examsApi.createExam(examData);
+                toast.success("Exam created successfully!");
+            }
             onSuccess();
         } catch (error: any) {
-            toast.error(error.response?.data?.detail || "Failed to create exam");
+            toast.error(error.response?.data?.detail || `Failed to ${examId ? 'update' : 'create'} exam`);
         } finally {
             setIsLoading(false);
         }
@@ -176,8 +226,8 @@ const CreateExamModal = ({ onClose, onSuccess }: CreateExamModalProps) => {
                             <Plus className="h-6 w-6 text-primary" />
                         </div>
                         <div>
-                            <CardTitle className="text-2xl">Create New Assessment</CardTitle>
-                            <CardDescription>Design manually or use NVIDIA AI to generate from notes</CardDescription>
+                            <CardTitle className="text-2xl">{examId ? 'Edit Assessment' : 'Create New Assessment'}</CardTitle>
+                            <CardDescription>{examId ? 'Update your existing exam details and questions' : 'Design manually or use NVIDIA AI to generate from notes'}</CardDescription>
                         </div>
                     </div>
                     <Button variant="ghost" size="icon" onClick={onClose} className="rounded-full hover:bg-destructive/10 hover:text-destructive">
@@ -187,15 +237,17 @@ const CreateExamModal = ({ onClose, onSuccess }: CreateExamModalProps) => {
 
                 <div className="flex-1 overflow-y-auto p-6">
                     <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                        <TabsList className="grid w-full grid-cols-2 mb-8 p-1 bg-muted/50 rounded-xl">
-                            <TabsTrigger value="manual" className="rounded-lg gap-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">
-                                <Plus className="h-4 w-4" /> Manual Design
-                            </TabsTrigger>
-                            <TabsTrigger value="ai" className="rounded-lg gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                                <Cpu className="h-4 w-4" /> NVIDIA AI Portal
-                                <span className="bg-background/20 text-[10px] px-1.5 py-0.5 rounded uppercase font-bold tracking-tighter ml-1">Beta</span>
-                            </TabsTrigger>
-                        </TabsList>
+                        {!examId && (
+                            <TabsList className="grid w-full grid-cols-2 mb-8 p-1 bg-muted/50 rounded-xl">
+                                <TabsTrigger value="manual" className="rounded-lg gap-2 data-[state=active]:bg-background data-[state=active]:shadow-sm">
+                                    <Plus className="h-4 w-4" /> Manual Design
+                                </TabsTrigger>
+                                <TabsTrigger value="ai" className="rounded-lg gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+                                    <Cpu className="h-4 w-4" /> NVIDIA AI Portal
+                                    <span className="bg-background/20 text-[10px] px-1.5 py-0.5 rounded uppercase font-bold tracking-tighter ml-1">Beta</span>
+                                </TabsTrigger>
+                            </TabsList>
+                        )}
 
                         {/* Manual Tab */}
                         <TabsContent value="manual" className="space-y-8 animate-in slide-in-from-left-4 duration-300">
@@ -254,6 +306,43 @@ const CreateExamModal = ({ onClose, onSuccess }: CreateExamModalProps) => {
                                         value={examData.passing_score}
                                         onChange={e => setExamData(p => ({ ...p, passing_score: +e.target.value }))}
                                     />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-primary/5 rounded-xl border border-primary/10">
+                                <div className="space-y-2">
+                                    <Label className="text-sm font-semibold">Exam Mode</Label>
+                                    <select
+                                        className="w-full h-11 rounded-lg border bg-background px-3"
+                                        value={examData.exam_mode}
+                                        onChange={e => {
+                                            const mode = e.target.value as any;
+                                            setExamData(p => ({
+                                                ...p,
+                                                exam_mode: mode,
+                                                proctoring_enabled: mode === 'competitive_mcq' ? true : p.proctoring_enabled
+                                            }));
+                                        }}
+                                    >
+                                        <option value="mixed">Mixed (MCQ + Descriptive)</option>
+                                        <option value="competitive_mcq">Competitive MCQ (Only MCQ + Proctoring)</option>
+                                        <option value="only_descriptive">Only Descriptive</option>
+                                    </select>
+                                </div>
+                                <div className="flex items-center space-x-3 self-end pb-2">
+                                    <Switch
+                                        id="proctoring-manual"
+                                        checked={examData.proctoring_enabled}
+                                        onCheckedChange={v => setExamData(p => ({ ...p, proctoring_enabled: v }))}
+                                        disabled={examData.exam_mode === 'competitive_mcq'}
+                                    />
+                                    <div className="space-y-0.5">
+                                        <Label htmlFor="proctoring-manual" className="cursor-pointer flex items-center gap-2">
+                                            Proctorium Protocol
+                                            {examData.exam_mode === 'competitive_mcq' && <span className="text-[10px] bg-primary/20 text-primary px-1.5 py-0.5 rounded">Required</span>}
+                                        </Label>
+                                        <p className="text-[10px] text-muted-foreground">Enable AI-based monitoring and lockdown</p>
+                                    </div>
                                 </div>
                             </div>
 
@@ -479,6 +568,38 @@ const CreateExamModal = ({ onClose, onSuccess }: CreateExamModalProps) => {
                                                 />
                                             </div>
                                         </div>
+
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="space-y-2">
+                                                <Label className="text-sm font-semibold">Exam Mode</Label>
+                                                <select
+                                                    className="w-full h-11 rounded-lg border bg-background px-3"
+                                                    value={aiParams.exam_mode}
+                                                    onChange={e => {
+                                                        const mode = e.target.value as any;
+                                                        setAiParams(p => ({
+                                                            ...p,
+                                                            exam_mode: mode,
+                                                            proctoring_enabled: mode === 'competitive_mcq' ? true : p.proctoring_enabled,
+                                                            question_types: mode === 'competitive_mcq' ? ['mcq'] : (mode === 'only_descriptive' ? ['descriptive'] : ['mcq', 'descriptive'])
+                                                        }));
+                                                    }}
+                                                >
+                                                    <option value="mixed">Mixed</option>
+                                                    <option value="competitive_mcq">Competitive MCQ</option>
+                                                    <option value="only_descriptive">Only Descriptive</option>
+                                                </select>
+                                            </div>
+                                            <div className="flex items-center space-x-3 self-end pb-2">
+                                                <Switch
+                                                    id="proctoring-ai"
+                                                    checked={aiParams.proctoring_enabled}
+                                                    onCheckedChange={v => setAiParams(p => ({ ...p, proctoring_enabled: v }))}
+                                                    disabled={aiParams.exam_mode === 'competitive_mcq'}
+                                                />
+                                                <Label htmlFor="proctoring-ai" className="cursor-pointer text-xs">Proctorium Protocol</Label>
+                                            </div>
+                                        </div>
                                     </div>
 
                                     <div className="space-y-4 p-6 border rounded-2xl bg-muted/20">
@@ -562,7 +683,7 @@ const CreateExamModal = ({ onClose, onSuccess }: CreateExamModalProps) => {
                     <Button variant="outline" onClick={onClose} disabled={isLoading} className="rounded-xl h-11 px-6">Cancel</Button>
                     {activeTab === "manual" ? (
                         <Button onClick={handleManualSubmit} disabled={isLoading} className="rounded-xl h-11 px-8 min-w-[160px] shadow-lg shadow-primary/20">
-                            {isLoading ? <Loader2 className="animate-spin h-5 w-5" /> : "Publish Manual Exam"}
+                            {isLoading ? <Loader2 className="animate-spin h-5 w-5" /> : examId ? "Update Exam" : "Publish Manual Exam"}
                         </Button>
                     ) : (
                         <Button

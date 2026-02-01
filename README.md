@@ -12,9 +12,10 @@ Before running this project, make sure you have the following installed:
 |----------|---------|---------------|
 | **Python** | 3.10 - 3.12 | [python.org](https://www.python.org/downloads/) |
 | **Node.js** | 18+ | [nodejs.org](https://nodejs.org/) |
+| **MongoDB** | 6.0+ | [mongodb.com](https://www.mongodb.com/try/download/community) |
 | **Git** | Latest | [git-scm.com](https://git-scm.com/) |
 
-> ⚠️ **Note**: Python 3.14 may have compatibility issues with some AI libraries. Python 3.11 or 3.12 is recommended.
+> ⚠️ **Note**: Ensure MongoDB is running on your local machine at `mongodb://localhost:27017` (default).
 
 ---
 
@@ -62,7 +63,16 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-#### 2.5 Initialize the database with sample data
+#### 2.5 Configure Environment Variables
+Create a `.env` file in the `backend` directory (optional if using defaults):
+```env
+MONGODB_URL=mongodb://localhost:27017
+DATABASE_NAME=ai_assessment
+SECRET_KEY=your-super-secret-key-change-in-production
+NVIDIA_API_KEY=your_nvidia_nim_key_here
+```
+
+#### 2.6 Initialize the database with sample data
 ```bash
 python seed_db.py
 ```
@@ -71,16 +81,15 @@ This creates:
 - Admin user: `admin` / `admin123`
 - Teacher user: `teacher` / `teacher123`
 - Student user: `student` / `student123`
-- Sample exam with questions
+- Sample exam with automated questions
 
-#### 2.6 Start the backend server
+#### 2.7 Start the backend server
 ```bash
-python -m uvicorn app.main:app --reload --port 8000 --host 127.0.0.1
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
 ✅ Backend should now be running at: **http://127.0.0.1:8000**
-
-You can view the API docs at: **http://127.0.0.1:8000/docs**
+API Docs: **http://127.0.0.1:8000/docs**
 
 ---
 
@@ -101,13 +110,25 @@ npm install
 npm run dev
 ```
 
-✅ Frontend should now be running at: **http://localhost:5173**
+✅ Frontend should now be running at: **http://localhost:3000**
+
+---
+
+## 🐳 Running with Docker
+
+You can use Docker Compose to start the entire system (Backend + Database) in one command:
+
+```bash
+docker-compose up --build
+```
+
+*Note: If MongoDB is not part of the compose file, ensure the backend container can reach your MongoDB instance.*
 
 ---
 
 ## 🎯 Access the Application
 
-Open your browser and go to: **http://localhost:5173**
+Open your browser and go to: **http://localhost:3000**
 
 ### Test Accounts:
 
@@ -123,63 +144,49 @@ Open your browser and go to: **http://localhost:5173**
 
 ```
 ai-inclusive-assessment/
-├── backend/                 # Python FastAPI Backend
+├── backend/                 # FastAPI Backend (Python)
 │   ├── app/
-│   │   ├── api/            # API routes (auth, exams, analytics)
-│   │   ├── agents/         # AI agents (grading, adaptive, OCR)
-│   │   ├── core/           # Security, config
-│   │   └── db/             # Database models
-│   ├── data/               # SQLite database
-│   ├── requirements.txt    # Python dependencies
+│   │   ├── api/            # Routes (Auth, Exams, Analytics, Riva)
+│   │   ├── agents/         # AI Logic (Semantic Grader, OCR, Riva)
+│   │   ├── core/           # Security, Config
+│   │   └── db/             # MongoDB Models (Beanie ODM)
+│   ├── requirements.txt    # Python deps
 │   └── seed_db.py          # Database seeder
 │
-├── frontend/               # React Vite Frontend
+├── frontend/               # React + TypeScript + Vite
 │   ├── src/
-│   │   ├── components/     # Reusable components
-│   │   ├── context/        # Auth context
-│   │   ├── pages/          # Page components
-│   │   └── services/       # API service
-│   ├── package.json        # Node dependencies
-│   └── index.html          # Entry HTML
+│   │   ├── components/     # UI Components (Radix UI + Lucide)
+│   │   ├── pages/          # Full Page Layouts
+│   │   ├── lib/            # API Client (Axios)
+│   │   └── hooks/          # Custom React Hooks
+│   ├── package.json        # Node deps
+│   └── vite.config.ts      # Proxy & Port Config (3000)
 │
-└── README.md               # This file
+└── docker-compose.yml      # Container orchestration
 ```
 
 ---
 
 ## 🔧 Troubleshooting
 
-### Problem: Backend won't start
-```bash
-# Reinstall dependencies
-pip install --upgrade pip
-pip install -r requirements.txt --force-reinstall
-```
+### Problem: "Could not connect to MongoDB"
+- Ensure MongoDB service is started: `services.msc` on Windows or `sudo systemctl start mongod` on Linux.
+- Check connection string in `.env`.
 
-### Problem: Port 8000 already in use
-```bash
-# Windows
-netstat -ano | findstr :8000
-taskkill /PID <PID> /F
+### Problem: Frontend cannot talk to Backend
+- Ensure Backend is running on port 8000.
+- Check Vite proxy in `vite.config.ts` (proxies `/api` to `localhost:8000`).
 
-# Mac/Linux
-lsof -i :8000
-kill -9 <PID>
-```
-
-### Problem: Port 5173 already in use
+### Problem: Port 3000 already in use (Frontend)
 ```bash
 # Windows
-netstat -ano | findstr :5173
+netstat -ano | findstr :3000
 taskkill /PID <PID> /F
 ```
 
-### Problem: Database errors
+### Problem: Reseed Database
 ```bash
-# Delete and recreate the database
 cd backend
-del data\assessment.db    # Windows
-rm data/assessment.db     # Mac/Linux
 python seed_db.py
 ```
 
@@ -189,33 +196,30 @@ python seed_db.py
 
 | Task | Command |
 |------|---------|
-| Start Backend | `cd backend && .\venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000` |
-| Start Frontend | `cd frontend && npm run dev` |
-| Reseed Database | `cd backend && python seed_db.py` |
-| Install Backend Deps | `cd backend && pip install -r requirements.txt` |
-| Install Frontend Deps | `cd frontend && npm install` |
+| Start Backend | `uvicorn app.main:app --reload` |
+| Start Frontend | `npm run dev` |
+| Seed Database | `python seed_db.py` |
+| Docker Build | `docker-compose up --build` |
 
 ---
 
-## ✨ Features
+## ✨ Key Features
 
-- ✅ **Adaptive Testing** - Questions adjust to student ability
-- ✅ **AI Grading** - Semantic similarity for descriptive answers
-- ✅ **Voice Controls** - Speech-to-text for answers
-- ✅ **Handwriting OCR** - Upload handwritten answers
-- ✅ **Role-Based Access** - Admin, Teacher, Student roles
-- ✅ **Exam History** - Track past performance
-- ✅ **Dark Theme** - Easy on the eyes
-- ✅ **Fully Responsive** - Works on mobile and desktop
+- 🧠 **Adaptive Testing** - Questions adjust difficulty based on student performance.
+- 🖋️ **Semantic Grading** - AI-powered grading for descriptive answers (similarity checking).
+- 🎙️ **Accessibility Mode** - Voice controls, text-to-speech, and simplified UI.
+- 📸 **Handwriting OCR** - Capture and process handwritten responses (mocked for demo).
+- 📊 **Teacher Dashboard** - Detailed analytics and manual review capabilities.
+- 🔒 **Role-Based Access** - Secure login for Admins, Teachers, and Students.
 
 ---
 
 ## 📞 Support
 
-If you encounter any issues, check:
-1. Both servers are running (backend on 8000, frontend on 5173)
-2. Virtual environment is activated for Python
-3. Database is seeded with `python seed_db.py`
+If you encounter any issues:
+1. Ensure **MongoDB** is running.
+2. Check that the backend `.env` has the correct `MONGODB_URL`.
+3. Verify both servers are running (8000 and 3000).
 
 ---
 

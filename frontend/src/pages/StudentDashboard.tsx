@@ -11,7 +11,8 @@ import {
     BarChart3,
     Clock,
     Loader2,
-    MessageSquare
+    MessageSquare,
+    Lock
 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import { analyticsApi, examsApi, StudentAnalytics, Exam } from "@/lib/api";
@@ -245,8 +246,25 @@ const StudentDashboard = () => {
                                                 {exam.duration_minutes} minutes • {exam.total_marks} marks
                                             </p>
                                         </div>
-                                        <Button onClick={() => navigate(`/exam/${exam.id}`)} variant="outline">
-                                            Start Exam
+                                        <Button
+                                            onClick={() => navigate(`/exam/${exam.id}`)}
+                                            variant={exam.user_status && exam.user_status !== "in_progress" ? "secondary" : "outline"}
+                                            disabled={Boolean(exam.user_status && exam.user_status !== "in_progress")}
+                                            className="gap-2"
+                                        >
+                                            {exam.user_status && exam.user_status !== "in_progress" ? (
+                                                <>
+                                                    <Lock className="h-4 w-4" aria-hidden="true" />
+                                                    Attempt Locked
+                                                </>
+                                            ) : exam.user_status === "in_progress" ? (
+                                                <>
+                                                    <PlayCircle className="h-4 w-4" aria-hidden="true" />
+                                                    Resume
+                                                </>
+                                            ) : (
+                                                "Start Exam"
+                                            )}
                                         </Button>
                                     </div>
                                 ))}

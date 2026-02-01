@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import List
 from beanie import PydanticObjectId
 
-from app.db.models import User, Exam, Submission, Answer, UserRole
+from app.db.models import User, Exam, Submission, Answer, UserRole, LoginRecord
 from app.agents.analytics import analytics_agent
 from .auth import get_current_user, require_role
 
@@ -85,11 +85,16 @@ async def teacher_dashboard(user: User = Depends(require_role(["teacher", "admin
             "submitted_at": s.submitted_at.isoformat() if s.submitted_at else None
         })
     
+    # Get login activity for the last 7 days
+    login_records = await LoginRecord.find_all().to_list() # For simplicity, getting all for now. Ideally filter by date.
+    
     return {
         "total_exams_created": len(exams),
         "total_submissions": len(submissions),
         "exams": [{"id": str(e.id), "title": e.title, "is_active": e.is_active} for e in exams],
-        "student_submissions": student_submissions
+        "student_submissions": student_submissions,
+        "login_activity": [{"timestamp": lr.timestamp.isoformat()} for lr in login_records],
+        "submission_activity": [{"timestamp": s.submitted_at.isoformat()} for s in submissions if s.submitted_at]
     }
 
 @router.get("/dashboard/admin")

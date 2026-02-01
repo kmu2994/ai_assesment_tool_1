@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
-import { Brain, Volume2, Contrast, Loader2 } from "lucide-react";
+import { Brain, Volume2, Contrast, Loader2, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import { authApi, RegisterData } from "@/lib/api";
 import { useAccessibility } from "@/hooks/useAccessibility";
@@ -38,6 +38,15 @@ const Login = () => {
         setIsLoading(true);
         try {
             const response = await authApi.login(loginEmail, loginPassword);
+
+            // Validate that the selected role matches the user's actual role
+            if (response.user.role !== role) {
+                // Clear the session as the user should not be logged in with the wrong role selector
+                authApi.logout();
+                toast.error("Account type is invalid");
+                return;
+            }
+
             toast.success(`Welcome back, ${response.user.full_name || response.user.username}!`);
 
             // Navigate based on role
@@ -78,9 +87,9 @@ const Login = () => {
             await authApi.register(data);
             toast.success("Account created successfully! Please login.");
 
-            // Auto-fill login form
-            setLoginEmail(signupEmail);
-            setLoginPassword("");
+            // Auto-fill login form with username and password
+            setLoginEmail(signupUsername);
+            setLoginPassword(signupPassword);
         } catch (error: unknown) {
             const err = error as { response?: { data?: { detail?: string } } };
             const message = err.response?.data?.detail || "Registration failed. Please try again.";
@@ -91,7 +100,18 @@ const Login = () => {
     };
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-primary/10 via-background to-accent/10 flex items-center justify-center p-4">
+        <div className="min-h-screen bg-gradient-to-br from-primary/10 via-background to-accent/10 flex items-center justify-center p-4 relative">
+            {/* Back Button */}
+            <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => navigate("/")}
+                className="absolute top-4 left-4 gap-2 hover:bg-primary/20"
+            >
+                <ArrowLeft className="h-4 w-4" />
+                Back to Home
+            </Button>
+
             <div className="w-full max-w-5xl grid md:grid-cols-2 gap-8 items-center animate-fade-in">
                 {/* Left Side - Branding */}
                 <div className="text-center md:text-left space-y-6">

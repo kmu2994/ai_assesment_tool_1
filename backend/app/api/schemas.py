@@ -74,11 +74,15 @@ class ExamAICreate(BaseModel):
     difficulty_distribution: Dict[str, float] = {"easy": 0.3, "medium": 0.4, "hard": 0.3}
     question_types: List[str] = ["mcq", "descriptive"]
     is_adaptive: bool = True
+    exam_mode: str = "mixed"
+    proctoring_enabled: bool = False
 
 class ExamCreate(BaseModel):
     title: str
     description: Optional[str] = None
     is_adaptive: bool = True
+    exam_mode: str = "mixed"
+    proctoring_enabled: bool = False
     duration_minutes: int = 60
     total_marks: float = 100.0
     passing_score: float = 40.0
@@ -89,6 +93,8 @@ class ExamResponse(BaseModel):
     title: str
     description: Optional[str] = None
     is_adaptive: bool = True
+    exam_mode: str = "mixed"
+    proctoring_enabled: bool = False
     duration_minutes: int = 60
     total_questions: int = 0
     total_marks: float = 100.0
@@ -99,6 +105,9 @@ class ExamResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+class ExamFullResponse(ExamResponse):
+    questions: List[QuestionResponse] = []
 
 class AnswerSubmit(BaseModel):
     question_id: str

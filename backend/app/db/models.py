@@ -14,6 +14,12 @@ class UserRole(str, Enum):
     ADMIN = "admin"
 
 
+class ExamMode(str, Enum):
+    COMPETITIVE_MCQ = "competitive_mcq"
+    ONLY_DESCRIPTIVE = "only_descriptive"
+    MIXED = "mixed"
+
+
 class User(Document):
     """User document model."""
     username: str = Field(..., unique=True, index=True)
@@ -56,6 +62,8 @@ class Exam(Document):
     created_by: PydanticObjectId
     is_active: bool = True
     is_adaptive: bool = True
+    exam_mode: ExamMode = ExamMode.MIXED
+    proctoring_enabled: bool = False
     duration_minutes: int = 60
     total_questions: int = 10
     total_marks: float = 100.0
@@ -102,3 +110,12 @@ class Submission(Document):
     
     class Settings:
         name = "submissions"
+
+
+class LoginRecord(Document):
+    """Record of user login activity."""
+    user_id: PydanticObjectId
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    
+    class Settings:
+        name = "login_records"

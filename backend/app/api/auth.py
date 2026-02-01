@@ -7,7 +7,7 @@ from datetime import timedelta
 from typing import List
 from beanie import PydanticObjectId
 
-from app.db.models import User, UserRole
+from app.db.models import User, UserRole, LoginRecord
 from app.core.security import verify_password, get_password_hash, create_access_token, decode_token, oauth2_scheme
 from app.core.config import settings
 from .schemas import UserCreate, UserLogin, UserResponse, Token
@@ -67,6 +67,10 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
         data={"sub": user.username, "role": user.role.value},
         expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
+    
+    # Record login activity
+    login_record = LoginRecord(user_id=user.id)
+    await login_record.insert()
     
     user_response = UserResponse(
         id=str(user.id),

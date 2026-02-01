@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, PlayCircle, Clock, Target, BookOpen, CheckCircle, Lock } from "lucide-react";
+import { Loader2, PlayCircle, Clock, Target, BookOpen, CheckCircle, Lock, ArrowLeft } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import { examsApi, Exam } from "@/lib/api";
 import { toast } from "sonner";
@@ -45,6 +45,15 @@ const ExamsList = () => {
             <Navbar />
 
             <main className="container mx-auto p-6 space-y-8 animate-fade-in">
+                <Button
+                    variant="ghost"
+                    onClick={() => navigate("/dashboard")}
+                    className="gap-2 hover:bg-primary/20"
+                >
+                    <ArrowLeft className="h-4 w-4" />
+                    Back to Dashboard
+                </Button>
+
                 {/* Header */}
                 <div className="text-center space-y-4">
                     <h1 className="text-4xl font-bold">Available Exams</h1>

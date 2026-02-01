@@ -14,7 +14,7 @@ from app.db.models import User, Exam, Question, Submission, Answer
 from app.agents.orchestrator import orchestrator
 from app.core.config import settings
 from .auth import get_current_user, require_role
-from .schemas import ExamCreate, ExamResponse, QuestionCreate, QuestionResponse, AnswerSubmit, GradingResult, SubmissionReview, ExamAICreate
+from .schemas import ExamCreate, ExamResponse, ExamFullResponse, QuestionCreate, QuestionResponse, AnswerSubmit, GradingResult, SubmissionReview, ExamAICreate
 from app.core.file_processor import extract_text_from_file
 from app.agents.nvidia_generator import nvidia_gen
 import json
@@ -26,6 +26,7 @@ async def preview_exam_ai(
     num_questions: int = Form(10),
     difficulty_distribution: str = Form('{"easy": 0.3, "medium": 0.4, "hard": 0.3}'),
     question_types: str = Form('["mcq", "descriptive"]'),
+    exam_mode: str = Form("mixed"),
     instructions: Optional[str] = Form(None),
     file: UploadFile = File(...),
     user: User = Depends(require_role(["teacher", "admin"]))
@@ -48,7 +49,14 @@ async def preview_exam_ai(
             )
 
         diff_dist = json.loads(difficulty_distribution)
-        q_types = json.loads(question_types)
+        
+        # Override question types if specific mode is selected
+        if exam_mode == "competitive_mcq":
+            q_types = ["mcq"]
+        elif exam_mode == "only_descriptive":
+            q_types = ["descriptive"]
+        else:
+            q_types = json.loads(question_types)
         
         questions_data = await nvidia_gen.generate_exam(
             study_material=text_content,
@@ -78,6 +86,8 @@ async def create_exam_ai(
     is_adaptive: bool = Form(True),
     difficulty_distribution: str = Form('{"easy": 0.3, "medium": 0.4, "hard": 0.3}'),
     question_types: str = Form('["mcq", "descriptive"]'),
+    exam_mode: str = Form("mixed"),
+    proctoring_enabled: bool = Form(False),
     instructions: Optional[str] = Form(None),
     file: UploadFile = File(...),
     user: User = Depends(require_role(["teacher", "admin"]))
@@ -97,7 +107,13 @@ async def create_exam_ai(
         
         # Parse JSON from Form strings
         diff_dist = json.loads(difficulty_distribution)
-        q_types = json.loads(question_types)
+        # Override question types if specific mode is selected
+        if exam_mode == "competitive_mcq":
+            q_types = ["mcq"]
+        elif exam_mode == "only_descriptive":
+            q_types = ["descriptive"]
+        else:
+            q_types = json.loads(question_types)
         
         # Generate questions using NVIDIA NIM
         questions_data = await nvidia_gen.generate_exam(
@@ -116,6 +132,8 @@ async def create_exam_ai(
             created_by=user.id,
             is_active=True,
             is_adaptive=is_adaptive,
+            exam_mode=exam_mode,
+            proctoring_enabled=proctoring_enabled,
             duration_minutes=60, # Default or add to form
             total_questions=len(questions_data),
             total_marks=total_marks,
@@ -145,6 +163,8 @@ async def create_exam_ai(
             title=exam.title,
             description=exam.description,
             is_adaptive=exam.is_adaptive,
+            exam_mode=exam.exam_mode,
+            proctoring_enabled=exam.proctoring_enabled,
             total_questions=exam.total_questions,
             total_marks=exam.total_marks,
             passing_score=exam.passing_score,
@@ -169,6 +189,8 @@ async def create_exam(
         description=exam_data.description,
         created_by=user.id,
         is_adaptive=exam_data.is_adaptive,
+        exam_mode=exam_data.exam_mode,
+        proctoring_enabled=exam_data.proctoring_enabled,
         duration_minutes=exam_data.duration_minutes,
         total_marks=exam_data.total_marks,
         passing_score=exam_data.passing_score,
@@ -194,6 +216,8 @@ async def create_exam(
         title=exam.title,
         description=exam.description,
         is_adaptive=exam.is_adaptive,
+        exam_mode=exam.exam_mode,
+        proctoring_enabled=exam.proctoring_enabled,
         duration_minutes=exam.duration_minutes,
         total_questions=exam.total_questions,
         total_marks=exam.total_marks,
@@ -205,9 +229,17 @@ async def list_available_exams(user: User = Depends(get_current_user)):
     """List all active exams available for students."""
     exams = await Exam.find(Exam.is_active == True).to_list()
     
-    # Get all submissions for this user to check status
-    user_submissions = await Submission.find(Submission.user_id == user.id).to_list()
-    submission_map = {s.exam_id: s.status for s in user_submissions}
+    # Get all submissions for this user to check status, sorted by most recent first
+    user_submissions = await Submission.find(
+        Submission.user_id == user.id
+    ).sort(-Submission.started_at).to_list()
+    
+    # Use string IDs for mapping; sort ensures the latest status is picked for each exam_id
+    submission_map = {}
+    for s in user_submissions:
+        eid = str(s.exam_id)
+        if eid not in submission_map:
+            submission_map[eid] = s.status
     
     return [
         ExamResponse(
@@ -215,11 +247,13 @@ async def list_available_exams(user: User = Depends(get_current_user)):
             title=e.title,
             description=e.description,
             is_adaptive=e.is_adaptive,
+            exam_mode=e.exam_mode,
+            proctoring_enabled=e.proctoring_enabled,
             duration_minutes=e.duration_minutes,
             total_questions=e.total_questions,
             total_marks=e.total_marks,
             passing_score=e.passing_score,
-            user_status=submission_map.get(e.id)
+            user_status=submission_map.get(str(e.id))
         ) for e in exams
     ]
 
@@ -234,6 +268,103 @@ async def get_exam(exam_id: str, user: User = Depends(get_current_user)):
         title=exam.title,
         description=exam.description,
         is_adaptive=exam.is_adaptive,
+        exam_mode=exam.exam_mode,
+        proctoring_enabled=exam.proctoring_enabled,
+        duration_minutes=exam.duration_minutes,
+        total_questions=exam.total_questions,
+        total_marks=exam.total_marks,
+        passing_score=exam.passing_score
+    )
+
+@router.get("/{exam_id}/details", response_model=ExamFullResponse)
+async def get_exam_details(exam_id: str, user: User = Depends(require_role(["teacher", "admin"]))):
+    """Get full exam details including questions."""
+    exam = await Exam.get(PydanticObjectId(exam_id))
+    if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
+        
+    questions = await Question.find(Question.exam_id == exam.id).to_list()
+    
+    return {
+        "id": str(exam.id),
+        "title": exam.title,
+        "description": exam.description,
+        "is_adaptive": exam.is_adaptive,
+        "exam_mode": exam.exam_mode,
+        "proctoring_enabled": exam.proctoring_enabled,
+        "duration_minutes": exam.duration_minutes,
+        "total_questions": exam.total_questions,
+        "total_marks": exam.total_marks,
+        "passing_score": exam.passing_score,
+        "is_active": exam.is_active,
+        "created_at": exam.created_at,
+        "questions": [
+            {
+                "id": str(q.id),
+                "question_text": q.question_text,
+                "question_type": q.question_type,
+                "difficulty": q.difficulty,
+                "points": q.points,
+                "options": q.options,
+                "bloom_level": q.bloom_level,
+                "concept_tags": q.concept_tags,
+                "adaptive_variants": q.adaptive_variants
+            } for q in questions
+        ]
+    }
+
+@router.put("/{exam_id}", response_model=ExamResponse)
+async def update_exam(
+    exam_id: str,
+    exam_data: ExamCreate,
+    user: User = Depends(require_role(["teacher", "admin"]))
+):
+    """Update an existing exam."""
+    exam = await Exam.get(PydanticObjectId(exam_id))
+    if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
+        
+    if user.role.value != "admin" and exam.created_by != user.id:
+        raise HTTPException(status_code=403, detail="You can only edit your own exams")
+
+    exam.title = exam_data.title
+    exam.description = exam_data.description
+    exam.is_adaptive = exam_data.is_adaptive
+    exam.exam_mode = exam_data.exam_mode
+    exam.proctoring_enabled = exam_data.proctoring_enabled
+    exam.duration_minutes = exam_data.duration_minutes
+    exam.total_marks = exam_data.total_marks
+    exam.passing_score = exam_data.passing_score
+    exam.total_questions = len(exam_data.questions)
+    
+    await exam.save()
+    
+    # Delete old questions and insert new ones
+    await Question.find(Question.exam_id == exam.id).delete()
+    
+    for q in exam_data.questions:
+        question = Question(
+            exam_id=exam.id,
+            question_text=q.question_text,
+            question_type=q.question_type,
+            difficulty=q.difficulty,
+            points=q.points,
+            options=q.options,
+            correct_answer=q.correct_answer,
+            model_answer=q.model_answer,
+            bloom_level=q.bloom_level,
+            concept_tags=q.concept_tags,
+            adaptive_variants=q.adaptive_variants
+        )
+        await question.insert()
+        
+    return ExamResponse(
+        id=str(exam.id),
+        title=exam.title,
+        description=exam.description,
+        is_adaptive=exam.is_adaptive,
+        exam_mode=exam.exam_mode,
+        proctoring_enabled=exam.proctoring_enabled,
         duration_minutes=exam.duration_minutes,
         total_questions=exam.total_questions,
         total_marks=exam.total_marks,
@@ -253,16 +384,16 @@ async def start_exam(exam_id: str, user: User = Depends(get_current_user)):
     )
     
     if existing_submission:
-        if existing_submission.status != "in_progress":
+        if existing_submission.status == "graded":
             raise HTTPException(
                 status_code=403, 
                 detail="You have already completed this assessment. Re-attempts are not allowed."
             )
         else:
-            # Optionally allow resuming an in-progress submission
-            # For now, we'll continue with the existing logic but just use the old submission
+            # Resume in-progress submission
             submission = existing_submission
     else:
+        # Create new submission
         submission = Submission(
             user_id=user.id,
             exam_id=exam.id,
@@ -286,6 +417,8 @@ async def start_exam(exam_id: str, user: User = Depends(get_current_user)):
             "title": exam.title,
             "description": exam.description,
             "is_adaptive": exam.is_adaptive,
+            "exam_mode": exam.exam_mode,
+            "proctoring_enabled": exam.proctoring_enabled,
             "duration_minutes": exam.duration_minutes,
             "total_questions": exam.total_questions
         },

@@ -67,6 +67,8 @@ export interface Exam {
     title: string;
     description: string | null;
     is_adaptive: boolean;
+    exam_mode: 'mixed' | 'competitive_mcq' | 'only_descriptive';
+    proctoring_enabled: boolean;
     duration_minutes: number;
     total_questions: number;
     total_marks: number;
@@ -76,6 +78,10 @@ export interface Exam {
     user_status?: string;
 }
 
+export interface FullExam extends Exam {
+    questions: Question[];
+}
+
 export interface Question {
     id: string;
     question_text: string;
@@ -83,6 +89,8 @@ export interface Question {
     difficulty: number;
     points: number;
     options: Record<string, string> | null;
+    correct_answer?: string;
+    model_answer?: string;
 }
 
 export interface ExamSession {
@@ -147,6 +155,8 @@ export interface TeacherDashboard {
         percentage: number;
         submitted_at: string | null;
     }>;
+    login_activity?: Array<{ timestamp: string }>;
+    submission_activity?: Array<{ timestamp: string }>;
 }
 
 export interface SubmissionDetail {
@@ -211,6 +221,8 @@ export interface ExamCreate {
     title: string;
     description?: string;
     is_adaptive?: boolean;
+    exam_mode?: 'mixed' | 'competitive_mcq' | 'only_descriptive';
+    proctoring_enabled?: boolean;
     duration_minutes?: number;
     total_marks?: number;
     passing_score?: number;
@@ -306,6 +318,16 @@ export const examsApi = {
 
     getExam: async (examId: string): Promise<Exam> => {
         const response = await apiClient.get<Exam>(`/exams/${examId}`);
+        return response.data;
+    },
+
+    getExamDetails: async (examId: string): Promise<FullExam> => {
+        const response = await apiClient.get<FullExam>(`/exams/${examId}/details`);
+        return response.data;
+    },
+
+    updateExam: async (examId: string, data: Partial<ExamCreate>): Promise<Exam> => {
+        const response = await apiClient.put<Exam>(`/exams/${examId}`, data);
         return response.data;
     },
 

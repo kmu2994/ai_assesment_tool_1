@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import models
-from app.db.models import User, Exam, Question, Submission, Answer, UserRole
+from app.db.models import User, Exam, Question, Submission, Answer, UserRole, LoginRecord
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -31,7 +31,7 @@ async def seed_database():
     
     await init_beanie(
         database=client[DATABASE_NAME],
-        document_models=[User, Exam, Question, Submission, Answer]
+        document_models=[User, Exam, Question, Submission, Answer, LoginRecord]
     )
     
     print("Connected! Clearing existing data...")
@@ -42,6 +42,7 @@ async def seed_database():
     await Question.delete_all()
     await Submission.delete_all()
     await Answer.delete_all()
+    await LoginRecord.delete_all()
     
     print("Creating users...")
     
